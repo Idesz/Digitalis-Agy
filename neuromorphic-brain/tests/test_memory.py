@@ -39,6 +39,7 @@ def test_episodic_memory_store_and_search():
     )
     em.store_event(e1)
     em.store_event(e2)
+    assert em.num_events() == 2
 
     # Search for vector close to e1
     hits = em.search_similar([0.9, 0.1, 0.0, 0.0], limit=1)

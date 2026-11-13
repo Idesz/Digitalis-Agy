@@ -25,9 +25,11 @@ class SleepConsolidator:
         self.episodic = episodic_memory
         self.semantic = semantic_memory
         self.max_drift_threshold = max_drift_threshold
+        self.consolidated_event_ids: set[str] = set()
 
         # Core anchor vector defining agent baseline identity / knowledge centroid
         # If None, dynamic anchoring: initial anchor learned or zeroed until established
+        self._dynamic_anchor = identity_anchor_vector is None
         if identity_anchor_vector is not None:
             vec = np.array(identity_anchor_vector, dtype=np.float32)
             norm = np.linalg.norm(vec)
@@ -58,17 +60,19 @@ class SleepConsolidator:
         3. Integrates them into the semantic graph while verifying no identity drift occurs.
         """
         recent_events = self.episodic.retrieve_recent(limit=batch_size)
+        unprocessed_events = [e for e in recent_events if e.event_id not in self.consolidated_event_ids]
         consolidated_concepts = 0
         consolidated_relations = 0
         rejected_for_drift = 0
 
-        for event in recent_events:
+        for event in unprocessed_events:
             vec = np.array(event.embedding, dtype=np.float32)
             drift = self.calculate_drift(vec)
 
-            # Safeguard: prevent identity drift
-            if drift > self.max_drift_threshold:
+            # Safeguard: prevent identity drift (if fixed anchor configured)
+            if not self._dynamic_anchor and drift > self.max_drift_threshold:
                 rejected_for_drift += 1
+                self.consolidated_event_ids.add(event.event_id)
                 continue
 
             concept_name = event.context.get("concept")
@@ -95,8 +99,19 @@ class SleepConsolidator:
                     )
                     consolidated_relations += 1
 
+                # If dynamic anchor, adaptively update running centroid
+                if self._dynamic_anchor and self.identity_anchor is not None:
+                    norm_v = np.linalg.norm(vec)
+                    if norm_v > 0:
+                        self.identity_anchor = 0.95 * self.identity_anchor + 0.05 * (vec / norm_v)
+                        norm_a = np.linalg.norm(self.identity_anchor)
+                        if norm_a > 0:
+                            self.identity_anchor /= norm_a
+
+            self.consolidated_event_ids.add(event.event_id)
+
         return {
-            "processed_events": len(recent_events),
+            "processed_events": len(unprocessed_events),
             "consolidated_concepts": consolidated_concepts,
             "consolidated_relations": consolidated_relations,
             "rejected_for_drift": rejected_for_drift,

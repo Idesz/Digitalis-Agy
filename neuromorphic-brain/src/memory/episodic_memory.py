@@ -5,6 +5,7 @@ with seamless fallback to an in-memory vector store.
 """
 
 from typing import Any, List, Optional
+import os
 import time
 import uuid
 import numpy as np
@@ -61,12 +62,14 @@ class EpisodicMemory:
     def __init__(
         self,
         collection_name: str = "brain_episodes",
-        host: str = "localhost",
-        port: int = 6333,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
         vector_dim: int = 64,
         force_fallback: bool = False,
     ):
         self.collection_name = collection_name
+        self.host = host or os.environ.get("QDRANT_HOST", "localhost")
+        self.port = port if port is not None else int(os.environ.get("QDRANT_PORT", 6333))
         self.vector_dim = vector_dim
         self.is_qdrant_connected = False
         self._qdrant_client = None
@@ -77,7 +80,7 @@ class EpisodicMemory:
                 from qdrant_client import QdrantClient
                 from qdrant_client.models import Distance, VectorParams
 
-                client = QdrantClient(host=host, port=port, timeout=0.5, check_compatibility=False)
+                client = QdrantClient(host=self.host, port=self.port, timeout=0.5, check_compatibility=False)
                 # Test connection
                 client.get_collections()
                 # Ensure collection exists
@@ -128,13 +131,15 @@ class EpisodicMemory:
                     collection_name=self.collection_name,
                     query_vector=query_vec,
                     limit=limit,
+                    with_vectors=True,
                 )
                 results = []
                 for hit in hits:
+                    retrieved_embedding = hit.vector if hit.vector is not None else query_vec
                     event = EpisodicEvent(
                         event_id=str(hit.id),
                         timestamp=hit.payload.get("timestamp", 0.0),
-                        embedding=query_vec,  # query context
+                        embedding=retrieved_embedding,
                         context=hit.payload.get("context", {}),
                         surprise=hit.payload.get("surprise", 0.0),
                     )
@@ -148,3 +153,7 @@ class EpisodicMemory:
         events = self._fallback_store.all_events()
         events.sort(key=lambda x: x.timestamp, reverse=True)
         return events[:limit]
+
+    def num_events(self) -> int:
+        """Returns the total number of events mirrored in the local store."""
+        return len(self._fallback_store.events)

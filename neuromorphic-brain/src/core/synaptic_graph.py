@@ -45,6 +45,8 @@ class SynapticGraphManager:
             timestamp = time.time()
         if node_id in self.nodes:
             self.nodes[node_id].activation_history.append(timestamp)
+            if len(self.nodes[node_id].activation_history) > 100:
+                self.nodes[node_id].activation_history = self.nodes[node_id].activation_history[-100:]
 
     def update_local_learning(self, node_a: str, node_b: str, time_window: float = 0.5) -> None:
         if node_a not in self.nodes or node_b not in self.nodes:
@@ -69,6 +71,8 @@ class SynapticGraphManager:
                 self.edges[edge_key].last_activated = now
 
     def prune_inactive_edges(self, threshold: float = 0.1, max_idle_time: float = 10.0) -> None:
+        if max_idle_time <= 0:
+            return
         now = time.time()
         keys_to_delete: List[str] = []
 
@@ -76,6 +80,7 @@ class SynapticGraphManager:
             idle_duration = now - edge.last_activated
             if idle_duration > max_idle_time:
                 edge.weight -= self.decay_factor * (idle_duration / max_idle_time)
+                edge.last_activated = now
 
             if edge.weight < threshold:
                 keys_to_delete.append(edge_key)

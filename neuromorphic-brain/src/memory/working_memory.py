@@ -4,6 +4,7 @@ Provides high-speed contextual storage with TTL support.
 Connects to Redis when available, or seamlessly falls back to a thread-safe in-memory cache.
 """
 
+import os
 import time
 import json
 import threading
@@ -50,14 +51,22 @@ class WorkingMemory:
     Working Memory manager for rapid state retrieval and contextual caching.
     """
 
-    def __init__(self, host: str = "localhost", port: int = 6379, db: int = 0, force_fallback: bool = False):
+    def __init__(
+        self,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+        db: int = 0,
+        force_fallback: bool = False,
+    ):
+        self.host = host or os.environ.get("REDIS_HOST", "localhost")
+        self.port = port if port is not None else int(os.environ.get("REDIS_PORT", 6379))
         self.is_redis_connected = False
         self._client = None
 
         if not force_fallback:
             try:
                 import redis
-                client = redis.Redis(host=host, port=port, db=db, socket_connect_timeout=0.5)
+                client = redis.Redis(host=self.host, port=self.port, db=db, socket_connect_timeout=0.5)
                 client.ping()
                 self._client = client
                 self.is_redis_connected = True

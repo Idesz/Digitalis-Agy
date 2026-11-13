@@ -198,13 +198,12 @@ class DECOLLENetwork(nn.Module):
 
     def forward_sequence(
         self, spike_sequence: torch.Tensor
-    ) -> Tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
+    ) -> Tuple[list[torch.Tensor], list[torch.Tensor]]:
         """
         spike_sequence: [batch_size, time_steps, in_features]
         Returns:
             layer_spikes: list of tensors [batch_size, time_steps, layer_features]
             layer_readouts: list of tensors [batch_size, num_classes] (mean readout over time)
-            layer_losses: to be populated during training
         """
         batch_size, time_steps, _ = spike_sequence.shape
         device = spike_sequence.device

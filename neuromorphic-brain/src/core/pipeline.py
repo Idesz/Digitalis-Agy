@@ -10,6 +10,7 @@ Integrates:
 """
 
 from typing import Dict, Any
+import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -24,6 +25,12 @@ from src.homeostasis.state_vector import HomeostaticState, BehavioralMode
 from src.predictive.residual_error import ResidualPredictiveModule
 from src.routing.cdr_router import CDRRouter, SystemRoute
 from src.world_model.jepa_simulator import JEPASimulator
+
+
+def _normalized_process_cpu_load(cpu_time_delta: float, wall_time_delta: float) -> float:
+    if wall_time_delta <= 0:
+        return 0.0
+    return float(np.clip(cpu_time_delta / wall_time_delta, 0.0, 1.0))
 
 
 class NeuromorphicCognitivePipeline:
@@ -46,6 +53,7 @@ class NeuromorphicCognitivePipeline:
         self.device = device or (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
         self.input_dim = input_dim
         self.num_classes = num_classes
+        self.step = 0
 
         # Pillar 1: SNN with DECOLLE local plasticity
         all_layer_dims = [input_dim] + hidden_dims
@@ -78,6 +86,8 @@ class NeuromorphicCognitivePipeline:
             hidden_dim=128,
         ).to(self.device)
         self.wm_optimizer = torch.optim.Adam(self.world_model.parameters(), lr=1e-3)
+        self._last_cpu_sample_time = time.process_time()
+        self._last_wall_sample_time = time.perf_counter()
 
     def process_batch(
         self,
@@ -121,6 +131,17 @@ class NeuromorphicCognitivePipeline:
         preds = final_readout.argmax(dim=-1)
         batch_accuracy = (preds == targets).float().mean().item()
         task_error = 1.0 - batch_accuracy
+        loss = sum(layer_losses) / len(layer_losses) if layer_losses else float(pred_loss.item())
+        layer_activity = [
+            inputs.detach().mean(dim=(0, 1)).cpu().tolist(),
+            *[spikes.detach().mean(dim=(0, 1)).cpu().tolist() for spikes in layer_spikes],
+            torch.softmax(final_readout.detach(), dim=-1).mean(dim=0).cpu().tolist(),
+        ]
+        spike_count = sum(int(torch.count_nonzero(spikes).item()) for spikes in layer_spikes)
+        connection_count = sum(
+            layer.linear.weight.numel() + layer.random_readout.weight.numel()
+            for layer in self.snn.layers
+        )
 
         # Latent representation from top SNN layer (mean spike trace)
         top_spikes = layer_spikes[-1].mean(dim=1)  # [batch_size, hidden_dims[-1]]
@@ -150,7 +171,9 @@ class NeuromorphicCognitivePipeline:
 
             if train_step:
                 self.wm_optimizer.zero_grad()
-                wm_loss = F.mse_loss(traj[-1], s_0)
+                # Train JEPA transition to predict observed latent representations
+                s_next_observed = top_spikes[1:2].detach() if top_spikes.size(0) > 1 else s_0
+                wm_loss = F.mse_loss(traj[0], s_next_observed)
                 wm_loss.backward()
                 self.wm_optimizer.step()
 
@@ -168,24 +191,40 @@ class NeuromorphicCognitivePipeline:
                 "concept": f"class_{targets[0].item()}",
                 "category": "digit",
                 "route": decision.value,
+                "related_to": f"parity_{targets[0].item() % 2}",
             },
             surprise=float(mean_surprise.item()),
         )
         self.episodic_mem.store_event(event)
 
         # 6. Update Homeostatic State Vector
+        cpu_sample_time = time.process_time()
+        wall_sample_time = time.perf_counter()
+        process_cpu_load = _normalized_process_cpu_load(
+            cpu_sample_time - self._last_cpu_sample_time,
+            wall_sample_time - self._last_wall_sample_time,
+        )
+        self._last_cpu_sample_time = cpu_sample_time
+        self._last_wall_sample_time = wall_sample_time
         self.homeostasis.update_observation(
             surprise=float(mean_surprise.item()),
             task_error=task_error,
-            system_load=0.15,
+            system_load=process_cpu_load,
             entropy=float(complexity),
         )
         mode = self.homeostasis.get_behavioral_mode()
 
+        self.step += 1
         return {
+            "step": self.step,
+            "loss": loss,
             "accuracy": batch_accuracy,
             "pred_loss": pred_loss.item(),
             "surprise": mean_surprise.item(),
+            "layer_activity": layer_activity,
+            "spike_count": spike_count,
+            "connection_count": connection_count,
+            "process_cpu_load": process_cpu_load,
             "layer_losses": layer_losses,
             "route": decision.value,
             "complexity": complexity,

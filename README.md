@@ -77,7 +77,7 @@ From the repository root, create a virtual environment and install the dependenc
 
 ```powershell
 Set-Location .\neuromorphic-brain
-py -3.15 -m venv .venv
+py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```

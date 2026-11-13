@@ -6,21 +6,23 @@ This document describes the data contracts, Python class interfaces, and event b
 
 ## 1. Core Data Models (`src/core/` & `src/homeostasis/`)
 
-### StateVector
+### HomeostaticState & StateVector
 ```python
-class StateVector:
+class HomeostaticState:
     curiosity: float         # [0.0, 1.0]
     error_rate: float        # [0.0, 1.0]
-    resource_stress: float   # [0.0, 1.0]
+    resource_stress: float   # [0.0, 1.0], smoothed process CPU load in the dashboard
     uncertainty: float       # [0.0, 1.0]
 
-    def update(self, reward: float, error: float, load: float, uncertainty: float) -> "StateVector": ...
-    def get_behavioral_mode(self) -> str: ...  # "EXPLORATION", "CAUTIOUS", "CONSERVATION", "BALANCED"
+    def update_observation(self, surprise: float, task_error: float, system_load: float, entropy: float, smoothing: float = 0.2) -> "HomeostaticState": ...
+    def get_behavioral_mode(self) -> BehavioralMode: ...  # "EXPLORATION", "CAUTIOUS", "CONSERVATION", "BALANCED"
+    @property
+    def vector(self) -> list[float]: ...
 ```
 
 ### EpisodicEvent
 ```python
-class EpisodicEvent:
+class EpisodicEvent(BaseModel):
     event_id: str
     timestamp: float
     embedding: list[float]
@@ -39,11 +41,14 @@ class DECOLLELayer(nn.Module):
         self,
         in_features: int,
         out_features: int,
-        tau_m: float = 20.0,
-        v_th: float = 1.0,
-        beta_decay: float = 0.9,
         num_classes: int = 10,
-        device: torch.device = None
+        tau_m: float = 20.0,
+        dt: float = 1.0,
+        v_th: float = 1.0,
+        gamma: float = 10.0,
+        trace_decay: float = 0.95,
+        target_rate: float = 0.05,
+        reg_rate_coef: float = 0.1,
     ): ...
 
     def forward_step(
@@ -58,34 +63,53 @@ class DECOLLELayer(nn.Module):
 
     def compute_local_loss(
         self,
-        local_logits: torch.Tensor,
+        readout_logits: torch.Tensor,
         targets: torch.Tensor,
-        spikes: torch.Tensor
+        accumulated_spikes: torch.Tensor,
+        time_steps: int,
     ) -> torch.Tensor:
         """
         Computes local loss including task cross-entropy and firing rate regularization.
         """
 ```
 
+### Synthetic Dataset (`src/core/dataset.py`)
+```python
+def get_neuromorphic_dataloader(
+    batch_size: int = 16,
+    num_samples: int = 100,
+    num_classes: int = 10,
+    data_dir: str | None = None,
+    task: str = "classification",
+) -> DataLoader: ...
+```
+
+`task="classification"` loads `processed_nmnist.pt` from `data_dir` when present, otherwise it uses
+the class-conditioned synthetic event stream. `task="xor"` and `task="parity"` always generate
+binary spike-pattern tasks with matching two-class labels. The dataset reports its active source
+(`N-MNIST`, `Synthetic DVS`, `Synthetic XOR`, or `Synthetic PARITY`).
+
 ### Memory Hierarchy (`src/memory/`)
 
 ```python
 class WorkingMemory:
-    def set(self, key: str, value: Any, ttl: int = 3600) -> bool: ...
+    def put(self, key: str, data: Any, ttl: int | None = 3600) -> bool: ...
     def get(self, key: str) -> Any | None: ...
-    def flush(self) -> None: ...
+    def delete(self, key: str) -> bool: ...
+    def clear(self) -> None: ...
 
 class EpisodicMemory:
     def store_event(self, event: EpisodicEvent) -> str: ...
-    def search_similar(self, query_vector: list[float], limit: int = 5) -> list[EpisodicEvent]: ...
+    def search_similar(self, query_vec: list[float], limit: int = 5) -> list[tuple[EpisodicEvent, float]]: ...
+    def retrieve_recent(self, limit: int = 100) -> list[EpisodicEvent]: ...
 
 class SemanticMemory:
-    def add_concept(self, concept_id: str, attributes: dict[str, Any]) -> None: ...
-    def add_relation(self, source: str, target: str, relation_type: str, weight: float = 1.0) -> None: ...
-    def query_subgraph(self, concept_id: str, depth: int = 2) -> dict[str, Any]: ...
+    def add_concept(self, concept_id: str, attributes: dict[str, Any] | None = None) -> None: ...
+    def add_relation(self, source: str, target: str, relation_type: str, weight: float = 1.0, attributes: dict[str, Any] | None = None) -> None: ...
+    def query_subgraph(self, concept_id: str, depth: int = 1) -> dict[str, Any]: ...
 
 class SleepConsolidator:
-    def run_consolidation_cycle(self) -> dict[str, int]:
+    def consolidate(self, batch_size: int = 50) -> dict[str, int]:
         """
         Extracts recent episodic events, abstracts concepts into semantic graph,
         and ensures zero identity drift.
@@ -94,27 +118,32 @@ class SleepConsolidator:
 
 ### Predictive Coding (`src/predictive/residual_error.py`)
 ```python
-class PredictiveCodingResidual(nn.Module):
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+class ResidualPredictiveModule(nn.Module):
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Returns: (prediction, residual_error)
+        Returns: (prediction, residual_error, latent)
+        """
+
+    def gated_loss(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, bool]:
+        """
+        Calculates loss gated by residual error magnitude above surprise threshold.
         """
 ```
 
 ### Cognitive Decision Routing (`src/routing/cdr_router.py`)
 ```python
-class RoutingDecision(Enum):
+class SystemRoute(str, Enum):
     FAST = "FAST_SYSTEM_1"
     SLOW = "SLOW_SYSTEM_2"
 
 class CDRRouter:
-    def evaluate(
+    def route(
         self,
         correlation_strength: float,
         domain_crossing: float,
         stakeholder_count: int,
         uncertainty: float
-    ) -> tuple[RoutingDecision, float, dict[str, float]]:
+    ) -> tuple[SystemRoute, float, dict[str, float]]:
         """
         Calculates gating metric Phi(q) and routes to FAST or SLOW system.
         """
@@ -123,8 +152,8 @@ class CDRRouter:
 ### World Model (`src/world_model/jepa_simulator.py`)
 ```python
 class JEPASimulator(nn.Module):
-    def predict_next(self, latent_state: torch.Tensor, action: torch.Tensor) -> torch.Tensor: ...
-    def rollout(self, initial_state: torch.Tensor, action_sequence: list[torch.Tensor]) -> list[torch.Tensor]: ...
+    def predict_next_latent(self, latent_state: torch.Tensor, action: torch.Tensor) -> torch.Tensor: ...
+    def simulate_rollout(self, initial_latent: torch.Tensor, action_sequence: torch.Tensor) -> tuple[list[torch.Tensor], torch.Tensor]: ...
 ```
 
 ---
@@ -132,3 +161,24 @@ class JEPASimulator(nn.Module):
 ## 3. Communication Protocols
 - Internal Module Communication: Python In-Process Direct Calls / Async Queues.
 - Memory Layer: Redis (TCP port 6379) and Qdrant (gRPC/HTTP port 6333) with seamless fallback to In-Memory stores when external daemons are absent.
+
+## 4. Dashboard Training API
+- `GET /api/catalog` lists locally runnable workflows, external benchmarks, training paradigms, and ranking types.
+- `POST /api/plan` accepts `prompt`, `epochs`, `lr`, and `batch_size`, then describes the task selected from the prompt.
+- `POST /api/train/start` accepts the same fields, validates positive training parameters, and returns `{ "ok": bool, "message": str }`.
+- Prompts containing `parity`/`paritás` or `xor` train the corresponding binary synthetic dataset; other supported prompts use general classification.
+- MMLU, HumanEval, GSM8K, MATH, and LMSYS Arena are catalogued but are not executed by the current spiking classifier; unsupported benchmark prompts return HTTP 400 rather than silently running a different task.
+- `lr` is passed to the DECOLLE optimizer. Training state is streamed through `/api/stream` with `RUNNING`, `COMPLETED`, `STOPPED`, or `ERROR` status.
+- `POST /api/train/stop` requests cooperative cancellation.
+- `GET /api/state` returns the latest snapshot. Its `has_metrics` flag is false until a complete measured snapshot is published. External `/api/update` clients must explicitly send `has_metrics: true` only with a complete sample; partial updates do not make defaults look measured.
+- `step` counts successfully processed batches and `total_steps` is `epochs * len(dataloader)`. The progress bar is based on those values, while `epoch` identifies the current epoch.
+- `last_accuracy` is the accuracy on the current training batch, not a held-out test-set score. `last_loss` is the mean of the DECOLLE layer-local losses for that training batch.
+- `process_cpu_load` is the process CPU-time delta divided by elapsed wall time between consecutive batch samples, bounded to `[0, 1]` (one logical core, capped at 100%). The interval includes time between batches. `resource_stress` is the homeostatic smoothed value derived from that measurement; it is not system-wide CPU or memory utilization.
+- Loss, batch accuracy, homeostatic values, spike counts, and layer activity are taken from the processed pipeline batch. The canvas compresses actual input, hidden-spike, and output-probability means into an illustrative layout; it does not animate or generate synthetic activity.
+- The displayed output-layer size is derived from the final layer's measured activity vector, so binary tasks show two outputs rather than a fixed default of ten.
+- Working memory indicates whether the active pipeline currently holds its `current_perceptual_state` (active/empty), not a general item total. Episodic count is the active pipeline's local event mirror; semantic concepts and relations count the active session's in-memory graph.
+- The displayed input source is `N-MNIST` only when `data/n_mnist/processed_nmnist.pt` is available and loaded. Otherwise classification uses `Synthetic DVS`; XOR and parity always use their labeled synthetic data.
+- When the launcher's initial simulation finishes, the web server remains available for dashboard training controls until the process is stopped with `Ctrl+C`.
+- `GET /api/leaderboard?type=<id>` returns ranking metadata and available rows; `POST /api/leaderboard/refresh` reports HTTP 409 until a verified official source is configured. At present all ranking URLs are unset, and even a configured source needs an adapter before refresh can work. No ranking values are fabricated.
+
+See [DASHBOARD_TRAINING_GUIDE.md](DASHBOARD_TRAINING_GUIDE.md) for the UI, data provenance, metric semantics, workflow limitations, launch commands, and verification instructions in one place.

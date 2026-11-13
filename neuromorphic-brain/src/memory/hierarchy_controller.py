@@ -53,6 +53,12 @@ class SleepConsolidationWorker:
 
     def run_sleep_consolidation(self, noise_threshold_age: float = 86400.0) -> None:
         now = time.time()
+        # Remove stale noisy unconsolidated events older than noise threshold
+        self.memory.episodic_memory = [
+            e for e in self.memory.episodic_memory
+            if not (not e["consolidated"] and (now - e["timestamp"]) > noise_threshold_age)
+        ]
+
         unconsolidated_events = [e for e in self.memory.episodic_memory if not e["consolidated"]]
 
         for event in unconsolidated_events:
@@ -64,10 +70,5 @@ class SleepConsolidationWorker:
                 self.memory.update_semantic_graph(subject, predicate)
 
             event["consolidated"] = True
-
-        self.memory.episodic_memory = [
-            e for e in self.memory.episodic_memory
-            if not (not e["consolidated"] and (now - e["timestamp"]) > noise_threshold_age)
-        ]
 
         self.memory.working_memory.clear()
