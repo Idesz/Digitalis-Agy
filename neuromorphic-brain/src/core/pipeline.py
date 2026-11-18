@@ -159,45 +159,7 @@ class NeuromorphicCognitivePipeline:
             uncertainty=float(self.homeostasis.uncertainty),
         )
 
-        # 4. If System 2 (Slow), invoke JEPA World Model Virtual Rollout
-        simulated_rollout_val = None
-        if decision == SystemRoute.SLOW:
-            s_0 = top_spikes[:1].detach()  # first sample [1, latent_dim] (detached latent state for world model)
-            # Mock candidate action sequence: one-hot for candidate classes
-            actions = torch.zeros(1, 3, self.num_classes, device=self.device)
-            actions[0, :, preds[0]] = 1.0
-            traj, total_val = self.world_model.simulate_rollout(s_0, actions)
-            simulated_rollout_val = total_val.item()
-
-            if train_step:
-                self.wm_optimizer.zero_grad()
-                # Train JEPA transition to predict observed latent representations
-                s_next_observed = top_spikes[1:2].detach() if top_spikes.size(0) > 1 else s_0
-                wm_loss = F.mse_loss(traj[0], s_next_observed)
-                wm_loss.backward()
-                self.wm_optimizer.step()
-
-        # 5. Working Memory & Episodic Logging
-        self.working_mem.put(
-            key="current_perceptual_state",
-            data={"predicted_class": int(preds[0].item()), "complexity": complexity},
-            ttl=300,
-        )
-
-        # Store in episodic memory
-        event = EpisodicEvent(
-            embedding=latent_repr,
-            context={
-                "concept": f"class_{targets[0].item()}",
-                "category": "digit",
-                "route": decision.value,
-                "related_to": f"parity_{targets[0].item() % 2}",
-            },
-            surprise=float(mean_surprise.item()),
-        )
-        self.episodic_mem.store_event(event)
-
-        # 6. Update Homeostatic State Vector
+        # 4. Update homeostasis and apply its behavioral constraints to routing.
         cpu_sample_time = time.process_time()
         wall_sample_time = time.perf_counter()
         process_cpu_load = _normalized_process_cpu_load(
@@ -213,6 +175,47 @@ class NeuromorphicCognitivePipeline:
             entropy=float(complexity),
         )
         mode = self.homeostasis.get_behavioral_mode()
+        if mode == BehavioralMode.CAUTIOUS:
+            decision = SystemRoute.SLOW
+
+        # 5. Conserve resources by skipping expensive rollouts under high load.
+        simulated_rollout_val = None
+        rollout_skipped = decision == SystemRoute.SLOW and mode == BehavioralMode.CONSERVATION
+        if decision == SystemRoute.SLOW and not rollout_skipped:
+            s_0 = top_spikes[:1].detach()  # first sample [1, latent_dim] (detached latent state for world model)
+            # Mock candidate action sequence: one-hot for candidate classes
+            actions = torch.zeros(1, 3, self.num_classes, device=self.device)
+            actions[0, :, preds[0]] = 1.0
+            traj, total_val = self.world_model.simulate_rollout(s_0, actions)
+            simulated_rollout_val = total_val.item()
+
+            if train_step:
+                self.wm_optimizer.zero_grad()
+                # Train JEPA transition to predict observed latent representations
+                s_next_observed = top_spikes[1:2].detach() if top_spikes.size(0) > 1 else s_0
+                wm_loss = F.mse_loss(traj[0], s_next_observed)
+                wm_loss.backward()
+                self.wm_optimizer.step()
+
+        # 6. Working Memory & Episodic Logging
+        self.working_mem.put(
+            key="current_perceptual_state",
+            data={"predicted_class": int(preds[0].item()), "complexity": complexity},
+            ttl=60 if mode == BehavioralMode.CONSERVATION else 300,
+        )
+
+        # Store in episodic memory
+        event = EpisodicEvent(
+            embedding=latent_repr,
+            context={
+                "concept": f"class_{targets[0].item()}",
+                "category": "digit",
+                "route": decision.value,
+                "related_to": f"parity_{targets[0].item() % 2}",
+            },
+            surprise=float(mean_surprise.item()),
+        )
+        self.episodic_mem.store_event(event)
 
         self.step += 1
         return {
@@ -231,6 +234,7 @@ class NeuromorphicCognitivePipeline:
             "behavioral_mode": mode.value,
             "state_vector": self.homeostasis.vector,
             "simulated_rollout_val": simulated_rollout_val,
+            "rollout_skipped": rollout_skipped,
         }
 
     def sleep_and_consolidate(self) -> Dict[str, int]:

@@ -9,6 +9,7 @@ Dynamically modulates agent behavior:
 
 from typing import List, Tuple
 from enum import Enum
+import math
 import numpy as np
 
 
@@ -33,6 +34,11 @@ class HomeostaticState:
         uncertainty: float = 0.2,
         decay_rate: float = 0.05,
     ):
+        values = (curiosity, error_rate, resource_stress, uncertainty, decay_rate)
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("Homeostatic values must be finite")
+        if decay_rate < 0:
+            raise ValueError("decay_rate must be non-negative")
         self.curiosity = float(np.clip(curiosity, 0.0, 1.0))
         self.error_rate = float(np.clip(error_rate, 0.0, 1.0))
         self.resource_stress = float(np.clip(resource_stress, 0.0, 1.0))
@@ -58,6 +64,12 @@ class HomeostaticState:
         - system_load drives resource_stress
         - entropy drives uncertainty
         """
+        if not 0.0 <= smoothing <= 1.0 or not math.isfinite(smoothing):
+            raise ValueError("smoothing must be finite and in [0, 1]")
+        observations = (surprise, task_error, system_load, entropy)
+        if not all(math.isfinite(value) for value in observations):
+            raise ValueError("Homeostatic observations must be finite")
+
         target_curiosity = np.clip(surprise * 1.2, 0.0, 1.0)
         target_error = np.clip(task_error, 0.0, 1.0)
         target_stress = np.clip(system_load, 0.0, 1.0)

@@ -1,4 +1,5 @@
 import pytest
+import math
 from src.homeostasis.state_vector import HomeostaticState, BehavioralMode
 
 
@@ -41,3 +42,14 @@ def test_homeostatic_update_and_decay():
     prev_curiosity = hs.curiosity
     hs.step_decay()
     assert hs.curiosity < prev_curiosity
+
+
+@pytest.mark.parametrize("smoothing", [-0.1, 1.1, math.nan])
+def test_homeostatic_update_rejects_invalid_smoothing(smoothing):
+    with pytest.raises(ValueError, match="smoothing"):
+        HomeostaticState().update_observation(0.1, 0.2, 0.3, 0.4, smoothing=smoothing)
+
+
+def test_homeostatic_update_rejects_non_finite_observations():
+    with pytest.raises(ValueError, match="observations must be finite"):
+        HomeostaticState().update_observation(math.inf, 0.2, 0.3, 0.4)

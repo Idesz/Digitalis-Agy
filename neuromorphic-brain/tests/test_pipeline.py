@@ -2,6 +2,7 @@ import pytest
 import torch
 from src.core.dataset import NeuromorphicDataset, get_neuromorphic_dataloader
 from src.core.pipeline import NeuromorphicCognitivePipeline, _normalized_process_cpu_load
+from src.routing.cdr_router import SystemRoute
 from src.dashboard.monitor import build_dashboard_telemetry
 
 
@@ -113,6 +114,50 @@ def test_full_cognitive_pipeline_cycle():
     c_stats = pipeline.sleep_and_consolidate()
     assert "processed_events" in c_stats
     assert c_stats["processed_events"] >= 1
+
+
+def test_cautious_homeostasis_forces_system_two(monkeypatch):
+    pipeline = NeuromorphicCognitivePipeline(
+        input_dim=4,
+        hidden_dims=[4],
+        num_classes=2,
+        device=torch.device("cpu"),
+    )
+    pipeline.homeostasis.error_rate = 0.9
+    monkeypatch.setattr(pipeline.router, "route", lambda **kwargs: (SystemRoute.FAST, 0.1, {}))
+    inputs = (torch.rand(2, 2, 4) > 0.8).float()
+    targets = torch.zeros(2, dtype=torch.long)
+
+    stats = pipeline.process_batch(inputs, targets, train_step=False)
+
+    assert stats["behavioral_mode"] == "CAUTIOUS"
+    assert stats["route"] == "SLOW_SYSTEM_2"
+    assert stats["rollout_skipped"] is False
+
+
+def test_resource_conservation_skips_world_model_rollout(monkeypatch):
+    pipeline = NeuromorphicCognitivePipeline(
+        input_dim=4,
+        hidden_dims=[4],
+        num_classes=2,
+        device=torch.device("cpu"),
+    )
+    pipeline.homeostasis.resource_stress = 0.99
+    monkeypatch.setattr(pipeline.router, "route", lambda **kwargs: (SystemRoute.SLOW, 0.9, {}))
+    monkeypatch.setattr(
+        pipeline.world_model,
+        "simulate_rollout",
+        lambda *args: pytest.fail("Rollout should be skipped in conservation mode"),
+    )
+    inputs = (torch.rand(2, 2, 4) > 0.8).float()
+    targets = torch.zeros(2, dtype=torch.long)
+
+    stats = pipeline.process_batch(inputs, targets, train_step=False)
+
+    assert stats["behavioral_mode"] == "CONSERVATION"
+    assert stats["route"] == "SLOW_SYSTEM_2"
+    assert stats["rollout_skipped"] is True
+    assert stats["simulated_rollout_val"] is None
 
 
 @pytest.mark.parametrize(
