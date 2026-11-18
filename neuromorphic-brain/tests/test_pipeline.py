@@ -188,6 +188,7 @@ def test_predictive_surprise_escalates_route(monkeypatch):
     assert observed_router_args["uncertainty"] == pytest.approx(0.9)
     assert stats["prediction_escalated"] is True
     assert stats["route"] == "SLOW_SYSTEM_2"
+    assert stats["selected_world_model_action"] in (0, 1)
 
 
 @pytest.mark.parametrize(

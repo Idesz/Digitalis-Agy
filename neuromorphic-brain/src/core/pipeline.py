@@ -151,6 +151,23 @@ class NeuromorphicCognitivePipeline:
         top_spikes = layer_spikes[-1].mean(dim=1)  # [batch_size, hidden_dims[-1]]
         latent_repr = top_spikes[0].detach().cpu().numpy().tolist()
 
+        if train_step and time_steps > 1:
+            observed_latents = layer_spikes[-1][0].detach()
+            current_latents = observed_latents[:-1]
+            next_latents = observed_latents[1:]
+            neutral_actions = current_latents.new_zeros(current_latents.shape[0], self.num_classes)
+            predicted_latents = self.world_model.predict_next_latent(current_latents, neutral_actions)
+            transition_loss = F.mse_loss(predicted_latents, next_latents)
+            stability_targets = torch.exp(-torch.mean(
+                (next_latents - current_latents).pow(2),
+                dim=-1,
+                keepdim=True,
+            ))
+            stability_loss = F.mse_loss(self.world_model.value_head(current_latents), stability_targets)
+            self.wm_optimizer.zero_grad()
+            (transition_loss + stability_loss).backward()
+            self.wm_optimizer.step()
+
         # 3. CDR Decision Routing
         # Retrieve similar past memories to compute familiarity / correlation
         similar_episodes = self.episodic_mem.search_similar(latent_repr, limit=1)
@@ -189,22 +206,18 @@ class NeuromorphicCognitivePipeline:
 
         # 5. Conserve resources by skipping expensive rollouts under high load.
         simulated_rollout_val = None
+        selected_world_model_action = None
         rollout_skipped = decision == SystemRoute.SLOW and mode == BehavioralMode.CONSERVATION
         if decision == SystemRoute.SLOW and not rollout_skipped:
-            s_0 = top_spikes[:1].detach()  # first sample [1, latent_dim] (detached latent state for world model)
-            # Mock candidate action sequence: one-hot for candidate classes
-            actions = torch.zeros(1, 3, self.num_classes, device=self.device)
-            actions[0, :, preds[0]] = 1.0
-            traj, total_val = self.world_model.simulate_rollout(s_0, actions)
-            simulated_rollout_val = total_val.item()
-
-            if train_step:
-                self.wm_optimizer.zero_grad()
-                # Train JEPA transition to predict observed latent representations
-                s_next_observed = top_spikes[1:2].detach() if top_spikes.size(0) > 1 else s_0
-                wm_loss = F.mse_loss(traj[0], s_next_observed)
-                wm_loss.backward()
-                self.wm_optimizer.step()
+            candidate_actions = torch.eye(self.num_classes, device=self.device)
+            candidate_actions = candidate_actions[:, None, :].expand(-1, 3, -1)
+            candidate_actions = candidate_actions.unsqueeze(0)
+            _, candidate_values = self.world_model.simulate_candidates(
+                top_spikes[:1].detach(),
+                candidate_actions,
+            )
+            selected_world_model_action = int(candidate_values[0].argmax().item())
+            simulated_rollout_val = float(candidate_values[0, selected_world_model_action].item())
 
         # 6. Working Memory & Episodic Logging
         self.working_mem.put(
@@ -245,6 +258,7 @@ class NeuromorphicCognitivePipeline:
             "simulated_rollout_val": simulated_rollout_val,
             "rollout_skipped": rollout_skipped,
             "prediction_escalated": prediction_escalated,
+            "selected_world_model_action": selected_world_model_action,
         }
 
     def sleep_and_consolidate(self) -> Dict[str, int]:

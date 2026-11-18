@@ -121,4 +121,6 @@ Where:
 ### Rollout Simulation
 System 2 leverages the world model to simulate $K$-step virtual rollouts:
 $$\{\mathbf{s}_{t+1}^{latent}, \dots, \mathbf{s}_{t+K}^{latent}\}$$
-Rollout outcomes are scored using the homeostatic drive function to select optimal trajectories before physical action execution.
+Rollout outcomes are scored by the learned value head. The current pipeline records its highest-scoring candidate; it does not execute physical actions.
+
+The current classifier pipeline evaluates one repeated one-hot candidate per output class. Its transition head is trained on adjacent latent states with a neutral action, and its value head is trained to estimate latent-state stability. Class labels are not used to construct candidate actions. Since the training data contains no observed actions, candidate-action rankings remain experimental rather than validated plans.

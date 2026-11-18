@@ -156,7 +156,10 @@ Routing dimensions and the threshold are finite values in `[0, 1]`; stakeholder 
 class JEPASimulator(nn.Module):
     def predict_next_latent(self, latent_state: torch.Tensor, action: torch.Tensor) -> torch.Tensor: ...
     def simulate_rollout(self, initial_latent: torch.Tensor, action_sequence: torch.Tensor) -> tuple[list[torch.Tensor], torch.Tensor]: ...
+    def simulate_candidates(self, initial_latent: torch.Tensor, candidate_action_sequences: torch.Tensor) -> tuple[list[list[torch.Tensor]], torch.Tensor]: ...
 ```
+
+`candidate_action_sequences` has shape `[batch, candidates, horizon, action_dim]`; the returned scores have shape `[batch, candidates]`.
 
 ---
 
