@@ -36,6 +36,30 @@ def test_decolle_layer_forward_step():
     assert logits.shape == (batch_size, num_classes)
     assert torch.all((spikes == 0.0) | (spikes == 1.0))
 
+    double_layer = DECOLLELayer(in_features=4, out_features=3, num_classes=2).double()
+    _, (potential, trace), logits = double_layer.forward_step(torch.ones(2, 4, dtype=torch.float64))
+    assert potential.dtype == torch.float64
+    assert trace.dtype == torch.float64
+    assert logits.dtype == torch.float64
+
+
+@pytest.mark.parametrize(
+    ("layer_sizes", "num_classes"),
+    [([4], 2), ([4, 0], 2), ([4, 3], 1)],
+)
+def test_decolle_network_rejects_invalid_dimensions(layer_sizes, num_classes):
+    with pytest.raises(ValueError):
+        DECOLLENetwork(layer_sizes=layer_sizes, num_classes=num_classes)
+
+
+def test_decolle_network_rejects_empty_or_mismatched_sequences():
+    net = DECOLLENetwork(layer_sizes=[4, 3], num_classes=2)
+
+    with pytest.raises(ValueError, match="positive batch and time"):
+        net.forward_sequence(torch.empty(1, 0, 4))
+    with pytest.raises(ValueError, match="input dimension"):
+        net.forward_sequence(torch.empty(1, 2, 5))
+
 
 def test_decolle_network_forward_and_local_learning():
     batch_size = 4

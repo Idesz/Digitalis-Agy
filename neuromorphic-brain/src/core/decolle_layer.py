@@ -65,6 +65,17 @@ class DECOLLELayer(nn.Module):
         reg_rate_coef: float = 0.1,
     ):
         super().__init__()
+        if in_features < 1 or out_features < 1:
+            raise ValueError("in_features and out_features must be positive")
+        if num_classes < 2:
+            raise ValueError("num_classes must be at least 2")
+        if tau_m <= 0 or dt < 0:
+            raise ValueError("tau_m must be positive and dt must be non-negative")
+        if gamma <= 0 or not 0.0 <= trace_decay < 1.0:
+            raise ValueError("gamma must be positive and trace_decay must be in [0, 1)")
+        if target_rate < 0 or reg_rate_coef < 0:
+            raise ValueError("target_rate and reg_rate_coef must be non-negative")
+
         self.in_features = in_features
         self.out_features = out_features
         self.num_classes = num_classes
@@ -88,8 +99,11 @@ class DECOLLELayer(nn.Module):
         """
         Initializes membrane potential U and smoothed spike trace S_bar.
         """
-        u = torch.zeros(batch_size, self.out_features, device=device)
-        s_bar = torch.zeros(batch_size, self.out_features, device=device)
+        if batch_size < 1:
+            raise ValueError("batch_size must be positive")
+        state = self.linear.weight.new_zeros(batch_size, self.out_features, device=device)
+        u = state
+        s_bar = torch.zeros_like(state)
         return u, s_bar
 
     def forward_step(
@@ -105,6 +119,9 @@ class DECOLLELayer(nn.Module):
             next_state: (next_u, next_s_bar)
             readout_logits: [batch_size, num_classes] (local linear readout)
         """
+        if input_spikes.ndim != 2 or input_spikes.shape[1] != self.in_features:
+            raise ValueError(f"input_spikes must have shape [batch_size, {self.in_features}]")
+
         batch_size = input_spikes.size(0)
         device = input_spikes.device
 
@@ -170,6 +187,11 @@ class DECOLLENetwork(nn.Module):
         reg_rate_coef: float = 0.1,
     ):
         super().__init__()
+        if len(layer_sizes) < 2 or any(size < 1 for size in layer_sizes):
+            raise ValueError("layer_sizes must contain at least two positive dimensions")
+        if num_classes < 2:
+            raise ValueError("num_classes must be at least 2")
+
         self.layers = nn.ModuleList()
         for i in range(len(layer_sizes) - 1):
             layer = DECOLLELayer(
@@ -205,6 +227,13 @@ class DECOLLENetwork(nn.Module):
             layer_spikes: list of tensors [batch_size, time_steps, layer_features]
             layer_readouts: list of tensors [batch_size, num_classes] (mean readout over time)
         """
+        if spike_sequence.ndim != 3:
+            raise ValueError("spike_sequence must have shape [batch_size, time_steps, in_features]")
+        if spike_sequence.shape[0] < 1 or spike_sequence.shape[1] < 1:
+            raise ValueError("spike_sequence must have positive batch and time dimensions")
+        if spike_sequence.shape[2] != self.layers[0].in_features:
+            raise ValueError(f"spike_sequence input dimension must be {self.layers[0].in_features}")
+
         batch_size, time_steps, _ = spike_sequence.shape
         device = spike_sequence.device
 
