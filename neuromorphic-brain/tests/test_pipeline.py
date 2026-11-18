@@ -160,6 +160,36 @@ def test_resource_conservation_skips_world_model_rollout(monkeypatch):
     assert stats["simulated_rollout_val"] is None
 
 
+def test_predictive_surprise_escalates_route(monkeypatch):
+    pipeline = NeuromorphicCognitivePipeline(
+        input_dim=4,
+        hidden_dims=[4],
+        num_classes=2,
+        device=torch.device("cpu"),
+        prediction_escalation_threshold=0.5,
+    )
+    observed_router_args = {}
+    monkeypatch.setattr(
+        pipeline.predictive,
+        "gated_loss",
+        lambda inputs: (torch.tensor(0.0), torch.tensor(0.9), False),
+    )
+
+    def fast_route(**kwargs):
+        observed_router_args.update(kwargs)
+        return SystemRoute.FAST, 0.1, {}
+
+    monkeypatch.setattr(pipeline.router, "route", fast_route)
+    inputs = (torch.rand(2, 2, 4) > 0.8).float()
+    targets = torch.zeros(2, dtype=torch.long)
+
+    stats = pipeline.process_batch(inputs, targets, train_step=False)
+
+    assert observed_router_args["uncertainty"] == pytest.approx(0.9)
+    assert stats["prediction_escalated"] is True
+    assert stats["route"] == "SLOW_SYSTEM_2"
+
+
 @pytest.mark.parametrize(
     ("cpu_time_delta", "wall_time_delta", "expected"),
     [(0.25, 0.5, 0.5), (2.0, 1.0, 1.0), (1.0, 0.0, 0.0)],

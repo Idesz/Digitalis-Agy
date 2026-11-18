@@ -46,13 +46,17 @@ class NeuromorphicCognitivePipeline:
         num_classes: int = 10,
         device: torch.device = None,
         lr: float = 1e-3,
+        prediction_escalation_threshold: float = 0.5,
     ):
+        if not 0.0 <= prediction_escalation_threshold <= 1.0:
+            raise ValueError("prediction_escalation_threshold must be in [0, 1]")
         if hidden_dims is None:
             hidden_dims = [128, 64]
 
         self.device = device or (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
         self.input_dim = input_dim
         self.num_classes = num_classes
+        self.prediction_escalation_threshold = prediction_escalation_threshold
         self.step = 0
 
         # Pillar 1: SNN with DECOLLE local plasticity
@@ -151,12 +155,16 @@ class NeuromorphicCognitivePipeline:
         # Retrieve similar past memories to compute familiarity / correlation
         similar_episodes = self.episodic_mem.search_similar(latent_repr, limit=1)
         corr_strength = similar_episodes[0][1] if similar_episodes else 0.2
+        predictive_uncertainty = max(
+            float(self.homeostasis.uncertainty),
+            float(mean_surprise.item()),
+        )
 
         decision, complexity, metrics = self.router.route(
             correlation_strength=float(corr_strength),
             domain_crossing=0.2 if batch_accuracy > 0.5 else 0.7,
             stakeholder_count=1,
-            uncertainty=float(self.homeostasis.uncertainty),
+            uncertainty=predictive_uncertainty,
         )
 
         # 4. Update homeostasis and apply its behavioral constraints to routing.
@@ -172,10 +180,11 @@ class NeuromorphicCognitivePipeline:
             surprise=float(mean_surprise.item()),
             task_error=task_error,
             system_load=process_cpu_load,
-            entropy=float(complexity),
+            entropy=max(float(complexity), float(mean_surprise.item())),
         )
         mode = self.homeostasis.get_behavioral_mode()
-        if mode == BehavioralMode.CAUTIOUS:
+        prediction_escalated = float(mean_surprise.item()) > self.prediction_escalation_threshold
+        if mode == BehavioralMode.CAUTIOUS or prediction_escalated:
             decision = SystemRoute.SLOW
 
         # 5. Conserve resources by skipping expensive rollouts under high load.
@@ -235,6 +244,7 @@ class NeuromorphicCognitivePipeline:
             "state_vector": self.homeostasis.vector,
             "simulated_rollout_val": simulated_rollout_val,
             "rollout_skipped": rollout_skipped,
+            "prediction_escalated": prediction_escalated,
         }
 
     def sleep_and_consolidate(self) -> Dict[str, int]:

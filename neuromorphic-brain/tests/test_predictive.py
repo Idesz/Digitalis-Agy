@@ -37,3 +37,28 @@ def test_gated_synaptic_loss():
     loss.backward()
     for param in module.parameters():
         assert param.grad is not None
+
+
+@pytest.mark.parametrize(
+    ("input_dim", "latent_dim", "threshold"),
+    [(0, 4, 0.1), (4, 0, 0.1), (4, 2, 1.1)],
+)
+def test_predictive_module_rejects_invalid_configuration(input_dim, latent_dim, threshold):
+    with pytest.raises(ValueError):
+        ResidualPredictiveModule(input_dim, latent_dim, surprise_threshold=threshold)
+
+
+@pytest.mark.parametrize(
+    "inputs",
+    [torch.empty(2, 0), torch.ones(2, 3), torch.tensor([[float("nan"), 0.0]])],
+)
+def test_predictive_module_rejects_invalid_inputs(inputs):
+    module = ResidualPredictiveModule(input_dim=2, latent_dim=2)
+    with pytest.raises(ValueError):
+        module(inputs)
+
+
+def test_predictive_module_requires_normalized_inputs():
+    module = ResidualPredictiveModule(input_dim=2, latent_dim=2)
+    with pytest.raises(ValueError, match=r"\[0, 1\]"):
+        module(torch.tensor([[1.1, 0.0]]))

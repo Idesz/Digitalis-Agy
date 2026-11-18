@@ -85,6 +85,7 @@ Hierarchical predictive processing posits that higher layers do not transmit raw
 - Synaptic plastic updates are gated by residual magnitude:
   $$\Delta W \propto g(\|\mathbf{r}_t\|_2) \cdot \nabla W$$
   where $g(r) \approx 0$ when prediction error is negligible, saving energy and preserving learned weights.
+- In the pipeline, batch surprise also contributes to router uncertainty; a mean residual above the configurable `prediction_escalation_threshold` (default `0.5`) escalates the decision to System 2.
 
 ---
 

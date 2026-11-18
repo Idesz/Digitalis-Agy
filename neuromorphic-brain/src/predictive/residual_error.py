@@ -6,6 +6,7 @@ E = |Input - Prediction|
 """
 
 from typing import Tuple
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -25,6 +26,10 @@ class ResidualPredictiveModule(nn.Module):
         surprise_threshold: float = 0.05,
     ):
         super().__init__()
+        if input_dim < 1 or latent_dim < 1:
+            raise ValueError("input_dim and latent_dim must be positive")
+        if not math.isfinite(surprise_threshold) or not 0.0 <= surprise_threshold <= 1.0:
+            raise ValueError("surprise_threshold must be finite and in [0, 1]")
         self.input_dim = input_dim
         self.latent_dim = latent_dim
         self.surprise_threshold = surprise_threshold
@@ -50,8 +55,15 @@ class ResidualPredictiveModule(nn.Module):
             residual_error: [batch_size, input_dim] (E = |Input - Prediction|)
             latent: [batch_size, latent_dim]
         """
+        if x.ndim != 2 or x.shape[0] < 1 or x.shape[1] != self.input_dim:
+            raise ValueError(f"x must have shape [batch_size, {self.input_dim}]")
+        if not torch.isfinite(x).all():
+            raise ValueError("x must contain only finite values")
+        if torch.any((x < 0.0) | (x > 1.0)):
+            raise ValueError("x values must be in [0, 1]")
+
         latent = self.encoder(x)
-        prediction = self.generator(x_latent := latent)
+        prediction = self.generator(latent)
         residual_error = torch.abs(x - prediction)
         return prediction, residual_error, latent
 
