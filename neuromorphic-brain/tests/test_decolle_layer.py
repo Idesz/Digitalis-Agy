@@ -69,3 +69,18 @@ def test_decolle_network_forward_and_local_learning():
         # Verify random readout has no gradients (fixed projection)
         assert layer.random_readout.weight.grad is None
         opt.step()
+
+
+def test_decolle_sequence_detaches_temporal_state():
+    net = DECOLLENetwork(layer_sizes=[4, 4], num_classes=2)
+    inputs = torch.ones(1, 2, 4, requires_grad=True)
+
+    layer_spikes, _ = net.forward_sequence(inputs)
+    temporal_gradient = torch.autograd.grad(
+        layer_spikes[0][:, 1].sum(),
+        inputs,
+        allow_unused=True,
+    )[0]
+
+    assert temporal_gradient is not None
+    assert torch.count_nonzero(temporal_gradient[:, 0]) == 0

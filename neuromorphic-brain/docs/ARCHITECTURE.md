@@ -35,6 +35,7 @@ $$\Delta W^l[t] \propto - e^l[t] (P^l)^T \odot \sigma'(U^l[t]) \otimes \bar{S}^{
 ### Optimizer & Regularization
 - **Optimizer**: AdaMax configured with $\beta_1 = 0.0$ (memory-free momentum for streaming updates) and $\beta_2 = 0.95$.
 - **Activity & Activation Regularization**: Firing rate penalty $L_{reg} = \lambda_{rate} (\frac{1}{T}\sum_t S_i[t] - f_{target})^2$ prevents both quiescent networks and epileptic over-firing.
+- The implementation detaches membrane and spike-trace state between time steps, preventing temporal BPTT; each layer is also detached before it feeds the next layer.
 
 ---
 

@@ -8,8 +8,12 @@ from typing import Any, List, Optional
 import os
 import time
 import uuid
+import logging
 import numpy as np
 from pydantic import BaseModel, Field
+
+
+logger = logging.getLogger(__name__)
 
 
 class EpisodicEvent(BaseModel):
@@ -103,8 +107,9 @@ class EpisodicMemory:
         self._fallback_store.insert(event)
 
         if self.is_qdrant_connected and self._qdrant_client is not None:
-            from qdrant_client.models import PointStruct
             try:
+                from qdrant_client.models import PointStruct
+
                 self._qdrant_client.upsert(
                     collection_name=self.collection_name,
                     points=[
@@ -120,7 +125,8 @@ class EpisodicMemory:
                     ],
                 )
             except Exception:
-                pass
+                logger.exception("Failed to store episodic event in Qdrant; switching to in-memory storage")
+                self.is_qdrant_connected = False
         return event.event_id
 
     def search_similar(self, query_vec: List[float], limit: int = 5) -> List[tuple[EpisodicEvent, float]]:
@@ -146,7 +152,8 @@ class EpisodicMemory:
                     results.append((event, float(hit.score)))
                 return results
             except Exception:
-                pass
+                logger.exception("Qdrant episodic search failed; switching to in-memory storage")
+                self.is_qdrant_connected = False
         return self._fallback_store.search(query_vec, limit)
 
     def retrieve_recent(self, limit: int = 100) -> List[EpisodicEvent]:

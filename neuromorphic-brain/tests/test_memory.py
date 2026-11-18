@@ -98,3 +98,46 @@ def test_sleep_consolidation_and_identity_drift_protection():
     assert stats["rejected_for_drift"] >= 1
     assert sm.get_concept("core_digit") is not None
     assert sm.get_concept("rogue_concept") is None
+
+
+def test_sleep_consolidation_processes_events_beyond_one_batch():
+    em = EpisodicMemory(vector_dim=2, force_fallback=True)
+    sm = SemanticMemory()
+    consolidator = SleepConsolidator(em, sm)
+
+    for index in range(7):
+        em.store_event(EpisodicEvent(
+            embedding=[1.0, 0.0],
+            context={"concept": f"concept_{index}"},
+        ))
+
+    first_pass = consolidator.consolidate(batch_size=3)
+    second_pass = consolidator.consolidate(batch_size=3)
+    final_pass = consolidator.consolidate(batch_size=3)
+
+    assert first_pass["processed_events"] == 3
+    assert second_pass["processed_events"] == 3
+    assert final_pass["processed_events"] == 1
+    assert sm.num_concepts() == 7
+
+
+def test_dynamic_identity_anchor_rejects_drifting_events():
+    em = EpisodicMemory(vector_dim=2, force_fallback=True)
+    sm = SemanticMemory()
+    consolidator = SleepConsolidator(em, sm, max_drift_threshold=0.35)
+    em.store_event(EpisodicEvent(
+        embedding=[1.0, 0.0],
+        timestamp=time.time(),
+        context={"concept": "anchor"},
+    ))
+    em.store_event(EpisodicEvent(
+        embedding=[0.0, 1.0],
+        timestamp=time.time() - 1,
+        context={"concept": "drift"},
+    ))
+
+    stats = consolidator.consolidate()
+
+    assert stats["rejected_for_drift"] == 1
+    assert sm.get_concept("anchor") is not None
+    assert sm.get_concept("drift") is None

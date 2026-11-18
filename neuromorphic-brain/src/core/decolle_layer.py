@@ -222,6 +222,7 @@ class DECOLLENetwork(nn.Module):
                 spikes, state, readout = layer.forward_step(x_t, state)
                 step_spikes.append(spikes)
                 step_readouts.append(readout)
+                state = tuple(value.detach() for value in state)
 
             # Stack along time dimension: [batch_size, time_steps, out_features]
             stacked_spikes = torch.stack(step_spikes, dim=1)

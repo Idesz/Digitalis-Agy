@@ -54,6 +54,7 @@ def test_dataset_loads_local_preprocessed_nmnist_and_reports_source(tmp_path):
     )
 
     assert dataset.data_source == "N-MNIST"
+    assert len(dataset) == 2
     assert torch.equal(dataset.samples, samples[:2])
     assert torch.equal(dataset.labels, labels[:2])
 

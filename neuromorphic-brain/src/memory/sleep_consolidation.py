@@ -59,8 +59,12 @@ class SleepConsolidator:
         2. Identifies high-surprise or recurring concepts.
         3. Integrates them into the semantic graph while verifying no identity drift occurs.
         """
-        recent_events = self.episodic.retrieve_recent(limit=batch_size)
+        if batch_size < 1:
+            raise ValueError("batch_size must be a positive integer")
+
+        recent_events = self.episodic.retrieve_recent(limit=self.episodic.num_events())
         unprocessed_events = [e for e in recent_events if e.event_id not in self.consolidated_event_ids]
+        unprocessed_events = unprocessed_events[:batch_size]
         consolidated_concepts = 0
         consolidated_relations = 0
         rejected_for_drift = 0
@@ -69,8 +73,8 @@ class SleepConsolidator:
             vec = np.array(event.embedding, dtype=np.float32)
             drift = self.calculate_drift(vec)
 
-            # Safeguard: prevent identity drift (if fixed anchor configured)
-            if not self._dynamic_anchor and drift > self.max_drift_threshold:
+            # Reject memories that diverge too far from the fixed or learned anchor.
+            if self.identity_anchor is not None and drift > self.max_drift_threshold:
                 rejected_for_drift += 1
                 self.consolidated_event_ids.add(event.event_id)
                 continue

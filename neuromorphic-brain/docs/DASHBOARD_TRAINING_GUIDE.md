@@ -117,6 +117,7 @@ Különböző rangsorok eltérő mérőszámai nem hasonlíthatók közvetlenül
 | `POST /api/leaderboard/refresh` | Rangsor frissítése; jelenleg nincs konfigurált forrásadapter |
 
 Hibás terv- vagy indítási paraméter, illetve nem támogatott benchmark esetén az API `400` hibát ad. Ismeretlen rangsortípus szintén `400`; konfigurálatlan rangsor frissítése `409`; adapter nélküli konfigurált forrás `501` választ adna.
+A `has_metrics: true` jelzéshez teljes telemetriaminta szükséges; hiányos külső frissítés `400` hibát kap. Későbbi részleges frissítés megtartja a már érvényes minta mérési állapotát.
 
 ## 8. Ellenőrzés és hibakeresés
 

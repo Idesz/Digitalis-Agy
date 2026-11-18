@@ -165,7 +165,7 @@ class NeuromorphicCognitivePipeline:
             s_0 = top_spikes[:1].detach()  # first sample [1, latent_dim] (detached latent state for world model)
             # Mock candidate action sequence: one-hot for candidate classes
             actions = torch.zeros(1, 3, self.num_classes, device=self.device)
-            actions[0, :, targets[0]] = 1.0
+            actions[0, :, preds[0]] = 1.0
             traj, total_val = self.world_model.simulate_rollout(s_0, actions)
             simulated_rollout_val = total_val.item()
 

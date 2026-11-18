@@ -135,6 +135,32 @@ RANKING_TYPES = [
     },
 ]
 
+METRIC_SAMPLE_FIELDS = {
+    "epoch",
+    "epoch_target",
+    "total_steps",
+    "data_source",
+    "step",
+    "curiosity",
+    "error_rate",
+    "resource_stress",
+    "process_cpu_load",
+    "uncertainty",
+    "behavioral_mode",
+    "last_route",
+    "last_accuracy",
+    "last_surprise",
+    "last_loss",
+    "last_spike_count",
+    "connection_count",
+    "layer_activity",
+    "output_classes",
+    "working_memory_items",
+    "episodic_events_count",
+    "semantic_concepts_count",
+    "semantic_relations_count",
+}
+
 
 def get_dashboard_catalog() -> Dict[str, Any]:
     return {
@@ -302,6 +328,14 @@ class BrainStateMonitor:
     # ------------------------------------------------------------------
 
     def update(self, payload: Dict[str, Any]):
+        if "has_metrics" in payload and not isinstance(payload["has_metrics"], bool):
+            raise ValueError("has_metrics must be a boolean")
+        if payload.get("has_metrics") is True:
+            missing_fields = METRIC_SAMPLE_FIELDS.difference(payload)
+            if missing_fields:
+                missing = ", ".join(sorted(missing_fields))
+                raise ValueError(f"Incomplete telemetry sample; missing: {missing}")
+
         with self._lock:
             for k, v in payload.items():
                 if k == "log":
@@ -480,7 +514,7 @@ class BrainStateMonitor:
             f"**Cél (prompt):** {prompt}\n\n"
             f"**Lépések:**\n"
             f"1. 📦 Adathalmaz: {dataset} — batch={batch_size}\n"
-            f"2. 🧠 Modell: NeuromorphicCognitivePipeline (DECOLLE SNN, 3 réteg)\n"
+            f"2. 🧠 Modell: NeuromorphicCognitivePipeline (DECOLLE SNN, 2 réteg)\n"
             f"3. ⚙️ Tanítás: {epochs} epoch, lr={lr} ({lr_desc})\n"
             f"4. 💤 Sleep consolidation minden epoch után\n"
             f"5. 📊 Élő metrikák: loss, accuracy, surprise\n"
@@ -1876,11 +1910,13 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
         elif path == "/api/plan":
             try:
                 data = json.loads(body)
+                if not isinstance(data, dict):
+                    raise ValueError("Request body must be a JSON object")
                 plan = global_monitor.generate_plan(
                     prompt=data.get("prompt", ""),
-                    epochs=int(data.get("epochs", 50)),
-                    lr=float(data.get("lr", 0.001)),
-                    batch_size=int(data.get("batch_size", 16)),
+                    epochs=data.get("epochs", 50),
+                    lr=data.get("lr", 0.001),
+                    batch_size=data.get("batch_size", 16),
                 )
                 self._json({"plan": plan})
             except Exception as exc:
@@ -1889,11 +1925,13 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
         elif path == "/api/train/start":
             try:
                 data = json.loads(body)
+                if not isinstance(data, dict):
+                    raise ValueError("Request body must be a JSON object")
                 ok, msg = global_monitor.start_training(
                     prompt=data.get("prompt", ""),
-                    epochs=int(data.get("epochs", 50)),
-                    lr=float(data.get("lr", 0.001)),
-                    batch_size=int(data.get("batch_size", 16)),
+                    epochs=data.get("epochs", 50),
+                    lr=data.get("lr", 0.001),
+                    batch_size=data.get("batch_size", 16),
                 )
                 self._json({"ok": ok, "message": msg})
             except Exception as exc:

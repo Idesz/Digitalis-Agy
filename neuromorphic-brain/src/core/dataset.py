@@ -101,7 +101,7 @@ class NeuromorphicDataset(Dataset):
         return samples, labels
 
     def __len__(self) -> int:
-        return self.num_samples
+        return len(self.samples)
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         return self.samples[idx], self.labels[idx]

@@ -18,13 +18,26 @@ def test_brain_state_monitor_updates_and_ascii_render():
         "curiosity": 0.85,
         "error_rate": 0.12,
         "resource_stress": 0.35,
+        "process_cpu_load": 0.3,
         "uncertainty": 0.22,
         "behavioral_mode": "EXPLORATION",
         "last_route": "FAST_SYSTEM_1",
         "last_accuracy": 0.92,
         "last_surprise": 0.045,
+        "last_loss": 0.1,
+        "last_spike_count": 8,
+        "connection_count": 100,
+        "layer_activity": [[0.1], [0.2]],
+        "output_classes": 2,
+        "epoch": 1,
+        "epoch_target": 1,
+        "total_steps": 1,
+        "step": 1,
+        "data_source": "Synthetic DVS",
+        "working_memory_items": 1,
         "episodic_events_count": 14,
         "semantic_concepts_count": 6,
+        "semantic_relations_count": 2,
         "log": "Test cognitive event executed successfully.",
     })
 
@@ -200,6 +213,7 @@ def test_training_api_validates_requests_and_returns_plans(monkeypatch):
             plan = json.loads(response.read().decode("utf-8"))["plan"]
             assert "XOR tanulás" in plan
             assert "XOR szintetikus tüskesorozat" in plan
+            assert "DECOLLE SNN, 2 réteg" in plan
 
         invalid_plan_request = urllib.request.Request(
             f"{base_url}/api/plan",
@@ -209,6 +223,16 @@ def test_training_api_validates_requests_and_returns_plans(monkeypatch):
         with pytest.raises(urllib.error.HTTPError) as error:
             urllib.request.urlopen(invalid_plan_request)
         assert error.value.code == 400
+
+        for invalid_epochs in (2.9, True):
+            invalid_epoch_request = urllib.request.Request(
+                f"{base_url}/api/plan",
+                data=json.dumps({"prompt": "XOR", "epochs": invalid_epochs}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            with pytest.raises(urllib.error.HTTPError) as error:
+                urllib.request.urlopen(invalid_epoch_request)
+            assert error.value.code == 400
 
         invalid_request = urllib.request.Request(
             f"{base_url}/api/train/start",
@@ -400,13 +424,50 @@ def test_monitor_requires_explicit_complete_telemetry_flag():
     assert monitor.get_snapshot()["has_metrics"] is False
     monitor.update({"curiosity": 0.82})
     assert monitor.get_snapshot()["has_metrics"] is False
-    monitor.update({"has_metrics": True})
-    assert monitor.get_snapshot()["has_metrics"] is True
+    with pytest.raises(ValueError, match="Incomplete telemetry sample"):
+        monitor.update({"has_metrics": True})
+    with pytest.raises(ValueError, match="has_metrics must be a boolean"):
+        monitor.update({"has_metrics": "true"})
+    assert monitor.get_snapshot()["has_metrics"] is False
     monitor.update({"has_metrics": False})
     assert monitor.get_snapshot()["has_metrics"] is False
     monitor.update({"output_classes": 2})
     assert monitor.get_snapshot()["output_classes"] == 2
     assert monitor.get_snapshot()["has_metrics"] is False
+
+
+def test_monitor_accepts_complete_telemetry_sample():
+    monitor = BrainStateMonitor()
+    sample = {
+        "epoch": 1,
+        "epoch_target": 1,
+        "total_steps": 1,
+        "data_source": "Synthetic DVS",
+        "step": 1,
+        "curiosity": 0.5,
+        "error_rate": 0.1,
+        "resource_stress": 0.2,
+        "process_cpu_load": 0.3,
+        "uncertainty": 0.2,
+        "behavioral_mode": "BALANCED",
+        "last_route": "FAST_SYSTEM_1",
+        "last_accuracy": 0.5,
+        "last_surprise": 0.1,
+        "last_loss": 1.0,
+        "last_spike_count": 2,
+        "connection_count": 20,
+        "layer_activity": [[0.1], [0.2]],
+        "output_classes": 2,
+        "working_memory_items": 1,
+        "episodic_events_count": 1,
+        "semantic_concepts_count": 0,
+        "semantic_relations_count": 0,
+        "has_metrics": True,
+    }
+
+    monitor.update(sample)
+
+    assert monitor.get_snapshot()["has_metrics"] is True
 
 
 def test_training_loop_uses_learning_rate_and_reports_completion(monkeypatch):

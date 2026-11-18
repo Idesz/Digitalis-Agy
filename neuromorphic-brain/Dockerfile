@@ -16,4 +16,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Default execution
-CMD ["python", "train.py"]
+CMD ["python", "dashboard_app.py", "--web", "--no-tui"]

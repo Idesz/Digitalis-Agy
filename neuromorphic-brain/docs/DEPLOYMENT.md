@@ -17,6 +17,7 @@ This guide provides operational instructions for building, running, and deployin
 ## 2. Docker Compose Deployment
 
 The platform runs multi-container services including `brain-core`, `redis`, and `qdrant`.
+The `brain-core` container starts the web dashboard on port 8000; training can be started from its UI.
 
 ### Starting the Stack
 ```bash
@@ -66,7 +67,7 @@ python train.py
 ### In-Memory Fallbacks
 When running outside Docker without active Redis (port 6379) or Qdrant (port 6333) instances:
 - **Redis Client** falls back to an internal thread-safe in-memory key-value cache.
-- **Qdrant Client** falls back to Qdrant's embedded `:memory:` engine or an internal vector store index.
+- **Qdrant Client** falls back to an internal in-memory vector store.
 - All 6 pillars execute reliably without connection timeouts.
 
 ---

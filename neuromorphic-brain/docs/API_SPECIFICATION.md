@@ -171,6 +171,7 @@ class JEPASimulator(nn.Module):
 - `lr` is passed to the DECOLLE optimizer. Training state is streamed through `/api/stream` with `RUNNING`, `COMPLETED`, `STOPPED`, or `ERROR` status.
 - `POST /api/train/stop` requests cooperative cancellation.
 - `GET /api/state` returns the latest snapshot. Its `has_metrics` flag is false until a complete measured snapshot is published. External `/api/update` clients must explicitly send `has_metrics: true` only with a complete sample; partial updates do not make defaults look measured.
+- A complete external telemetry sample includes every measured state, training progress, activity, and memory-count field emitted by the local trainer. An incomplete update with `has_metrics: true` returns HTTP 400.
 - `step` counts successfully processed batches and `total_steps` is `epochs * len(dataloader)`. The progress bar is based on those values, while `epoch` identifies the current epoch.
 - `last_accuracy` is the accuracy on the current training batch, not a held-out test-set score. `last_loss` is the mean of the DECOLLE layer-local losses for that training batch.
 - `process_cpu_load` is the process CPU-time delta divided by elapsed wall time between consecutive batch samples, bounded to `[0, 1]` (one logical core, capped at 100%). The interval includes time between batches. `resource_stress` is the homeostatic smoothed value derived from that measurement; it is not system-wide CPU or memory utilization.
