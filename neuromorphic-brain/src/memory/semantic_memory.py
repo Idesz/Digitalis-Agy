@@ -33,12 +33,14 @@ class SemanticMemory:
         attributes: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Creates a directed semantic relationship edge."""
+        if not relation_type:
+            raise ValueError("relation_type must not be empty")
         if not self.graph.has_node(source):
             self.add_concept(source)
         if not self.graph.has_node(target):
             self.add_concept(target)
 
-        edge_attrs = attributes or {}
+        edge_attrs = dict(attributes or {})
         edge_attrs.update({"relation": relation_type, "weight": weight})
         self.graph.add_edge(source, target, **edge_attrs)
 
@@ -49,6 +51,8 @@ class SemanticMemory:
 
     def query_subgraph(self, concept_id: str, depth: int = 1) -> Dict[str, Any]:
         """Extracts ego subgraph around a concept for associative reasoning."""
+        if depth < 0:
+            raise ValueError("depth must be non-negative")
         if not self.graph.has_node(concept_id):
             return {"nodes": [], "edges": []}
 

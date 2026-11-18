@@ -5,6 +5,7 @@ Guards against identity drift using cosine similarity verification against core 
 """
 
 from typing import Dict, List, Optional
+import math
 import numpy as np
 from src.memory.episodic_memory import EpisodicMemory, EpisodicEvent
 from src.memory.semantic_memory import SemanticMemory
@@ -22,6 +23,8 @@ class SleepConsolidator:
         identity_anchor_vector: Optional[List[float]] = None,
         max_drift_threshold: float = 0.35,
     ):
+        if not math.isfinite(max_drift_threshold) or not 0.0 <= max_drift_threshold <= 2.0:
+            raise ValueError("max_drift_threshold must be finite and in [0, 2]")
         self.episodic = episodic_memory
         self.semantic = semantic_memory
         self.max_drift_threshold = max_drift_threshold
@@ -32,6 +35,10 @@ class SleepConsolidator:
         self._dynamic_anchor = identity_anchor_vector is None
         if identity_anchor_vector is not None:
             vec = np.array(identity_anchor_vector, dtype=np.float32)
+            if vec.ndim != 1 or vec.size != episodic_memory.vector_dim:
+                raise ValueError(f"identity_anchor_vector must have {episodic_memory.vector_dim} values")
+            if not np.all(np.isfinite(vec)):
+                raise ValueError("identity_anchor_vector values must be finite")
             norm = np.linalg.norm(vec)
             self.identity_anchor = (vec / norm) if norm > 0 else None
         else:

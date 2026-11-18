@@ -9,6 +9,7 @@ import os
 import time
 import uuid
 import logging
+import math
 import numpy as np
 from pydantic import BaseModel, Field
 
@@ -71,6 +72,8 @@ class EpisodicMemory:
         vector_dim: int = 64,
         force_fallback: bool = False,
     ):
+        if vector_dim < 1:
+            raise ValueError("vector_dim must be positive")
         self.collection_name = collection_name
         self.host = host or os.environ.get("QDRANT_HOST", "localhost")
         self.port = port if port is not None else int(os.environ.get("QDRANT_PORT", 6333))
@@ -103,6 +106,7 @@ class EpisodicMemory:
 
     def store_event(self, event: EpisodicEvent) -> str:
         """Stores a new episodic event record."""
+        self._validate_vector(event.embedding)
         # Always update local store
         self._fallback_store.insert(event)
 
@@ -131,6 +135,12 @@ class EpisodicMemory:
 
     def search_similar(self, query_vec: List[float], limit: int = 5) -> List[tuple[EpisodicEvent, float]]:
         """Returns most similar events and their cosine similarity score."""
+        self._validate_vector(query_vec)
+        if limit < 0:
+            raise ValueError("limit must be non-negative")
+        if limit == 0:
+            return []
+
         if self.is_qdrant_connected and self._qdrant_client is not None:
             try:
                 hits = self._qdrant_client.search(
@@ -157,6 +167,8 @@ class EpisodicMemory:
         return self._fallback_store.search(query_vec, limit)
 
     def retrieve_recent(self, limit: int = 100) -> List[EpisodicEvent]:
+        if limit < 0:
+            raise ValueError("limit must be non-negative")
         events = self._fallback_store.all_events()
         events.sort(key=lambda x: x.timestamp, reverse=True)
         return events[:limit]
@@ -164,3 +176,9 @@ class EpisodicMemory:
     def num_events(self) -> int:
         """Returns the total number of events mirrored in the local store."""
         return len(self._fallback_store.events)
+
+    def _validate_vector(self, vector: List[float]) -> None:
+        if len(vector) != self.vector_dim:
+            raise ValueError(f"Embedding must contain exactly {self.vector_dim} values")
+        if not all(math.isfinite(value) for value in vector):
+            raise ValueError("Embedding values must be finite")
