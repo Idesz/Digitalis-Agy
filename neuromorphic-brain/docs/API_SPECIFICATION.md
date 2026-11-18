@@ -149,6 +149,8 @@ class CDRRouter:
         """
 ```
 
+Routing dimensions and the threshold are finite values in `[0, 1]`; stakeholder counts must be non-negative integers. Invalid values or all-zero/negative routing weights are rejected instead of silently clipped.
+
 ### World Model (`src/world_model/jepa_simulator.py`)
 ```python
 class JEPASimulator(nn.Module):

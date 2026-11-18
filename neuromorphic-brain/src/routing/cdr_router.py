@@ -14,6 +14,7 @@ Gating rule: R(q) = FAST if f(C_s, D_c, S_m, U_l) < tau else SLOW.
 
 from typing import Dict, Tuple
 from enum import Enum
+import math
 import numpy as np
 
 
@@ -35,14 +36,21 @@ class CDRRouter:
         w_stakeholders: float = 0.2,
         w_uncertainty: float = 0.25,
     ):
-        self.tau = tau
+        weights = (w_correlation, w_domain, w_stakeholders, w_uncertainty)
+        if not math.isfinite(tau) or not 0.0 <= tau <= 1.0:
+            raise ValueError("tau must be finite and in [0, 1]")
+        if any(not math.isfinite(weight) or weight < 0 for weight in weights):
+            raise ValueError("routing weights must be finite and non-negative")
+
+        # Normalize weights
+        total_w = sum(weights)
+        if total_w == 0:
+            raise ValueError("at least one routing weight must be positive")
+        self.tau = float(tau)
         self.w_correlation = w_correlation
         self.w_domain = w_domain
         self.w_stakeholders = w_stakeholders
         self.w_uncertainty = w_uncertainty
-
-        # Normalize weights
-        total_w = w_correlation + w_domain + w_stakeholders + w_uncertainty
         self.w_correlation /= total_w
         self.w_domain /= total_w
         self.w_stakeholders /= total_w
@@ -63,10 +71,16 @@ class CDRRouter:
         - Higher number of stakeholders increases complexity.
         - High uncertainty increases complexity.
         """
-        c_s = np.clip(correlation_strength, 0.0, 1.0)
-        d_c = np.clip(domain_crossing, 0.0, 1.0)
-        s_m = np.clip(stakeholder_count / max(1, max_stakeholders), 0.0, 1.0)
-        u_l = np.clip(uncertainty, 0.0, 1.0)
+        c_s = self._unit_interval("correlation_strength", correlation_strength)
+        d_c = self._unit_interval("domain_crossing", domain_crossing)
+        u_l = self._unit_interval("uncertainty", uncertainty)
+        if isinstance(stakeholder_count, bool) or not isinstance(stakeholder_count, (int, np.integer)):
+            raise ValueError("stakeholder_count must be a non-negative integer")
+        if stakeholder_count < 0:
+            raise ValueError("stakeholder_count must be a non-negative integer")
+        if isinstance(max_stakeholders, bool) or not isinstance(max_stakeholders, (int, np.integer)) or max_stakeholders < 1:
+            raise ValueError("max_stakeholders must be a positive integer")
+        s_m = min(stakeholder_count / max_stakeholders, 1.0)
 
         unfamiliarity = 1.0 - c_s
 
@@ -77,6 +91,15 @@ class CDRRouter:
             + self.w_uncertainty * u_l
         )
         return float(score)
+
+    @staticmethod
+    def _unit_interval(name: str, value: float) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float, np.number)):
+            raise ValueError(f"{name} must be a finite number in [0, 1]")
+        result = float(value)
+        if not math.isfinite(result) or not 0.0 <= result <= 1.0:
+            raise ValueError(f"{name} must be a finite number in [0, 1]")
+        return result
 
     def route(
         self,

@@ -39,3 +39,40 @@ def test_cdr_weight_normalization():
     )
     total = router.w_correlation + router.w_domain + router.w_stakeholders + router.w_uncertainty
     assert abs(total - 1.0) < 1e-5
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"tau": float("nan")},
+        {"tau": 1.1},
+        {"w_correlation": -1.0},
+        {"w_correlation": 0.0, "w_domain": 0.0, "w_stakeholders": 0.0, "w_uncertainty": 0.0},
+    ],
+)
+def test_cdr_rejects_invalid_configuration(options):
+    with pytest.raises(ValueError):
+        CDRRouter(**options)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"correlation_strength": float("nan")},
+        {"domain_crossing": -0.1},
+        {"uncertainty": 1.1},
+        {"stakeholder_count": -1},
+        {"stakeholder_count": 1.5},
+    ],
+)
+def test_cdr_rejects_invalid_routing_dimensions(overrides):
+    inputs = {
+        "correlation_strength": 0.5,
+        "domain_crossing": 0.2,
+        "stakeholder_count": 1,
+        "uncertainty": 0.1,
+    }
+    inputs.update(overrides)
+
+    with pytest.raises(ValueError):
+        CDRRouter().route(**inputs)
