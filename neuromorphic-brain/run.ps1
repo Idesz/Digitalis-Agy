@@ -49,34 +49,34 @@ if ($Target -eq "docker") {
     exit 0
 }
 
-$pythonExecutable = $null
-$pythonPrefix = @()
-$launcher = Get-Command py -ErrorAction SilentlyContinue
-
-if ($launcher) {
-    & $launcher.Source -3.11 --version *> $null
-    if ($LASTEXITCODE -eq 0) {
-        $pythonExecutable = $launcher.Source
-        $pythonPrefix = @("-3.11")
-    }
-}
-
-if (-not $pythonExecutable) {
-    $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
-    if ($pythonCommand -and $pythonCommand.Source -notmatch "\\WindowsApps\\") {
-        $versionOutput = & $pythonCommand.Source --version 2>&1
-        if ($LASTEXITCODE -eq 0 -and "$versionOutput" -match "^Python 3\.11\.") {
-            $pythonExecutable = $pythonCommand.Source
-        }
-    }
-}
-
-if (-not $pythonExecutable) {
-    throw "Python 3.11 was not found. Install Python 3.11 x64 from https://www.python.org/downloads/windows/ and enable 'Add python.exe to PATH', then reopen PowerShell."
-}
-
 $venvPython = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path $venvPython)) {
+    $pythonExecutable = $null
+    $pythonPrefix = @()
+    $launcher = Get-Command py -ErrorAction SilentlyContinue
+
+    if ($launcher) {
+        & $launcher.Source -3.11 --version *> $null
+        if ($LASTEXITCODE -eq 0) {
+            $pythonExecutable = $launcher.Source
+            $pythonPrefix = @("-3.11")
+        }
+    }
+
+    if (-not $pythonExecutable) {
+        $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+        if ($pythonCommand -and $pythonCommand.Source -notmatch "\\WindowsApps\\") {
+            $versionOutput = & $pythonCommand.Source --version 2>&1
+            if ($LASTEXITCODE -eq 0 -and "$versionOutput" -match "^Python 3\.11\.") {
+                $pythonExecutable = $pythonCommand.Source
+            }
+        }
+    }
+
+    if (-not $pythonExecutable) {
+        throw "Python 3.11 was not found. Install Python 3.11 x64 from https://www.python.org/downloads/windows/ and enable 'Add python.exe to PATH', then reopen PowerShell."
+    }
+
     & $pythonExecutable @pythonPrefix -m venv (Join-Path $PSScriptRoot ".venv")
     if ($LASTEXITCODE -ne 0) {
         throw "Could not create the project's .venv virtual environment."

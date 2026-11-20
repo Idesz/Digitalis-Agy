@@ -3,6 +3,7 @@ Train the neuromorphic cognitive pipeline and report held-out test metrics.
 """
 
 import argparse
+import math
 import os
 import sys
 import time
@@ -14,9 +15,45 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 from src.core.benchmark import evaluate_classifier
 from src.core.dataset import get_neuromorphic_dataloader
-from src.core.pipeline import NeuromorphicCognitivePipeline
+from src.core.pipeline import MIN_WORLD_MODEL_TRANSITIONS, NeuromorphicCognitivePipeline
 from src.dashboard.monitor import global_monitor
 from src.routing.cdr_router import TaskRoutingContext
+
+
+class SampleWeightedMean:
+    def __init__(self) -> None:
+        self._weighted_total = 0.0
+        self._sample_count = 0
+
+    def add(self, value: float, sample_count: int) -> None:
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise ValueError("value must be a finite number")
+        if type(sample_count) is not int or sample_count < 1:
+            raise ValueError("sample_count must be a positive integer")
+        self._weighted_total += float(value) * sample_count
+        self._sample_count += sample_count
+
+    @property
+    def mean(self) -> float:
+        if self._sample_count == 0:
+            raise ValueError("cannot calculate a mean without samples")
+        return self._weighted_total / self._sample_count
+
+
+def world_model_training_status(transition_count: int) -> str:
+    if type(transition_count) is not int or transition_count < 0:
+        raise ValueError("transition_count must be a non-negative integer")
+    if transition_count == 0:
+        return "NOT TRAINED: no observed action transitions were supplied"
+    if transition_count < MIN_WORLD_MODEL_TRANSITIONS:
+        return (
+            f"PARTIALLY TRAINED: {transition_count} observed transitions; "
+            f"planning requires {MIN_WORLD_MODEL_TRANSITIONS}"
+        )
+    return (
+        f"TRAINED: {transition_count} observed transitions; "
+        "planning is eligible on slow routes"
+    )
 
 
 def main() -> None:
@@ -100,20 +137,25 @@ def main() -> None:
     agent.start_background_consolidation(
         interval_seconds=float(os.environ.get("SLEEP_CONSOLIDATION_INTERVAL_SECONDS", "3600"))
     )
-    print("    [Pillar 1] DECOLLE Local Plasticity LIF Network: READY")
-    print("    [Pillar 2] Hierarchical Memory & Sleep Engine:   READY")
-    print("    [Pillar 3] Homeostatic State Vector Monitor:     READY")
-    print("    [Pillar 4] Predictive Residual Error Module:     READY")
-    print("    [Pillar 5] Cognitive Decision Router (CDR):      READY")
-    print("    [Pillar 6] JEPA Latent World Model Simulator:    READY")
+    print("    [Pillar 1] DECOLLE Local Plasticity LIF Network: INITIALIZED")
+    print("    [Pillar 2] Hierarchical Memory & Sleep Engine:   INITIALIZED")
+    print("    [Pillar 3] Homeostatic State Vector Monitor:     INITIALIZED")
+    print("    [Pillar 4] Predictive Residual Error Module:     INITIALIZED")
+    print("    [Pillar 5] Cognitive Decision Router (CDR):      INITIALIZED")
+    print(
+        "    [Pillar 6] JEPA Latent World Model:             "
+        f"{world_model_training_status(agent.world_model_transition_count)}"
+    )
     print("-" * 70)
 
     start_time = time.time()
     for epoch in range(1, args.epochs + 1):
         print(f"\n>>> Epoch {epoch}/{args.epochs} Active Cycle")
-        epoch_acc = []
-        epoch_surprises = []
+        epoch_accuracy = SampleWeightedMean()
+        epoch_surprise = SampleWeightedMean()
         routes_taken = {"FAST_SYSTEM_1": 0, "SLOW_SYSTEM_2": 0}
+        rollouts_executed = 0
+        rollout_skip_reasons = {}
 
         for batch_idx, (inputs, targets) in enumerate(train_loader):
             stats = agent.process_batch(
@@ -129,6 +171,7 @@ def main() -> None:
             )
 
             cur_v = stats["state_vector"]
+            sample_count = targets.shape[0]
             global_monitor.update({
                 "curiosity": cur_v[0],
                 "error_rate": cur_v[1],
@@ -147,9 +190,16 @@ def main() -> None:
                 ),
             })
 
-            epoch_acc.append(stats["accuracy"])
-            epoch_surprises.append(stats["surprise"])
+            epoch_accuracy.add(stats["accuracy"], sample_count)
+            epoch_surprise.add(stats["surprise"], sample_count)
             routes_taken[stats["route"]] += 1
+            if stats["rollout_skipped"]:
+                skip_reason = stats["rollout_skip_reason"]
+                if not isinstance(skip_reason, str) or not skip_reason:
+                    raise RuntimeError("Skipped world-model rollout did not include a reason")
+                rollout_skip_reasons[skip_reason] = rollout_skip_reasons.get(skip_reason, 0) + 1
+            elif stats["planned_action_sequence"] is not None:
+                rollouts_executed += 1
 
             if (batch_idx + 1) % 5 == 0 or (batch_idx + 1) == len(train_loader):
                 print(
@@ -162,18 +212,23 @@ def main() -> None:
                     f"R:{cur_v[2]:.2f}, U:{cur_v[3]:.2f}]"
                 )
 
-        mean_acc = sum(epoch_acc) / len(epoch_acc)
-        mean_surp = sum(epoch_surprises) / len(epoch_surprises)
         print(
-            f"--- Epoch {epoch} Summary: Mean train batch accuracy: "
-            f"{mean_acc * 100:.2f}%, Mean Surprise: {mean_surp:.4f}"
+            f"--- Epoch {epoch} Summary: Sample-weighted train accuracy: "
+            f"{epoch_accuracy.mean * 100:.2f}%, Sample-weighted surprise: "
+            f"{epoch_surprise.mean:.4f}"
         )
         print(
-            f"--- Decision Routes: Fast (System 1): {routes_taken['FAST_SYSTEM_1']}, "
-            f"Slow (System 2): {routes_taken['SLOW_SYSTEM_2']}"
+            f"--- Routes: System 1: {routes_taken['FAST_SYSTEM_1']}; "
+            f"System 2 requested: {routes_taken['SLOW_SYSTEM_2']}; "
+            f"world-model rollouts executed: {rollouts_executed}; "
+            f"rollouts skipped: {rollout_skip_reasons}"
         )
         agent.homeostasis.step_decay()
 
+    print(
+        "[*] JEPA world-model training status: "
+        f"{world_model_training_status(agent.world_model_transition_count)}"
+    )
     test_metrics = evaluate_classifier(agent, test_loader)
     print(
         f"[*] Held-out test metrics ({data_source}; "

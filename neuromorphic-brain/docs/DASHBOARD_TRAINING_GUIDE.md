@@ -94,6 +94,8 @@ python train.py --require-n-mnist --all-train --all-test --epochs 3
 
 A `train.py` külön, hivatalos teszt-spliten számol keresztentrópiás tesztveszteséget és pontosságot; a tanító batch pontossága külön, tanítóeredményként jelenik meg. N-MNIST hiányában az alapértelmezett futás szintetikus adatot használ, és ezt `Synthetic DVS` forrásként jelenti. A `--require-n-mnist` ezt a fallbacket hibává alakítja.
 
+A `train.py` induláskor a pilléreket `INITIALIZED` állapotként jelzi, nem betanítottként. Az epoch pontosság- és meglepetésátlaga mintaszámmal súlyozott. A System 2 útvonal-kérések száma külön szerepel a ténylegesen végrehajtott világmodell-rolloutokétól és a kihagyott rolloutok okaitól. A szokásos XOR, paritás és N-MNIST osztályozási adatok nem tartalmaznak akciókat, ezért ezen a parancson a JEPA átmenetmodellje `NOT TRAINED` marad; megfigyelt akciófeltételes átmenetek nélkül a System 2 rollout nem futhat.
+
 Az osztályozási benchmark validációja kizárólag az N-MNIST tanítósplitből származik, a hivatalos tesztsplit pedig érintetlen marad:
 
 ```powershell
@@ -117,7 +119,7 @@ A ténylegesen kiválasztott forrás az első batch feldolgozása után a **DATA
 | Curiosity, error rate, uncertainty | Simított belső értékek: a kíváncsiság a prediktív meglepetésből, a hibaarány az aktuális batch hibájából, a bizonytalanság a router komplexitási jeléből és a prediktív bizonytalansági pontszámból származik | A prediktív pontszám a meglepetés és a batch-átlagos tüskearány-változás gördülő percentilise; 30 batch-es bemelegedés előtt a nyers normalizált pontszám. Nem annak kalibrált valószínűsége, hogy az osztályozás hibás |
 | Process CPU load (`/api/state`) | Két egymást követő batch-minta között mért folyamat-CPU-idő-különbség / eltelt falióra-idő, `[0,1]` tartományra korlátozva; az intervallum a batch-ek közötti várakozást is tartalmazza | API-mező; a felületen a belőle simított stressz látható, nem külön nyers CPU-gauge. Egy logikai maghoz viszonyított folyamatmérés, nem teljes gépszintű CPU- vagy RAM-mérés |
 | Process CPU stress | A fenti CPU-terhelésből simított homeosztatikus érték | Nem memóriatelítettség vagy operációsrendszer-szintű terhelés |
-| Route / Mode | A pipeline aktuális döntési útvonala és viselkedési módja | Belső router- és homeosztázis-eredmény |
+| Route / Mode | A pipeline aktuális döntési útvonala és viselkedési módja | A lassú útvonal kérése önmagában nem jelenti azt, hogy világmodell-rollout is lefutott; az epochösszegzés a végrehajtást és kihagyást külön jelzi |
 | Spikes / batch | A feldolgozott batch rejtett rétegeiben található nemnulla tüskék száma | Batchenként változik |
 | Connections | A hálózati rétegek súlymátrixainak és fix readout-mátrixainak elemszáma | Modellstruktúrából számított elemszám, nem élő aktivitás |
 | Layer activity | Bemeneti átlagok, rejtett rétegek átlagos tüskearánya és kimeneti átlagos valószínűségek | Az ábra ezeket kevesebb, szemléltető csomópontra sűríti |
@@ -137,7 +139,7 @@ A chartok batchenként frissülnek. A neurális ábra nem használ véletlen tü
 - **Felügyelet nélküli / prediktív tanulás:** prediktív kiegészítő veszteség létezik, de önálló, címkézetlen kezelőfelületi tanítási mód nincs.
 - **Megerősítéses tanulás / RLHF:** nincs csatlakoztatott jutalommodell vagy interaktív tanulási környezet.
 - **MMLU, HumanEval, GSM8K/MATH és LMSYS Arena:** katalógusbejegyzések, nem a helyi SNN-futtatóval jelenleg végrehajtható benchmarkok. Ezek promptként történő indítását a rendszer visszautasítja.
-- **AI rangsor:** LMSYS Chatbot Arena, BenchLM és Epoch AI választható típusok. Jelenleg egyikhez sincs hivatalos forrás-URL konfigurálva, nincs forrásadapter és nincsenek összehasonlítható Digitalis-Agy eredmények. Emiatt az oldal nem gyárt helyezést vagy értéket; frissítéskor a hiányzó konfigurációt jelzi.
+- **AI rangsor:** LMSYS Chatbot Arena Text, BenchLM és Epoch AI külön-külön betölthető. A forrásból származó sorok megjelennek, de összehasonlítható Digitalis-Agy benchmarkeredmény nélkül a helyi modell nem kap mesterséges helyezést.
 
 Különböző rangsorok eltérő mérőszámai nem hasonlíthatók közvetlenül össze. A helyi batch-pontosság nem helyettesíti például az Arena Elo-pontszámát vagy az MMLU eredményét.
 
@@ -153,11 +155,24 @@ Különböző rangsorok eltérő mérőszámai nem hasonlíthatók közvetlenül
 | `POST /api/train/start` | Helyi tanítás indítása ugyanilyen paraméterekkel |
 | `POST /api/train/stop` | Egy futó tanítás kooperatív leállításának kérése |
 | `POST /api/update` | Külső telemetriafrissítés; `has_metrics: true` csak teljes, valós mérési minta esetén |
-| `GET /api/leaderboard?type=<id>` | Rangsor metaadatainak lekérése |
-| `POST /api/leaderboard/refresh` | Rangsor frissítése; jelenleg nincs konfigurált forrásadapter |
+| `GET /api/leaderboard?type=<id>` | A kiválasztott hivatalos rangsorforrás lekérése és normalizálása |
+| `POST /api/leaderboard/refresh` | A kiválasztott rangsor friss lekérése |
 
-Hibás terv- vagy indítási paraméter, illetve nem támogatott benchmark esetén az API `400` hibát ad. Ismeretlen rangsortípus szintén `400`; konfigurálatlan rangsor frissítése `409`; adapter nélküli konfigurált forrás `501` választ adna.
+Hibás terv- vagy indítási paraméter, illetve nem támogatott benchmark esetén az API `400` hibát ad. Ismeretlen rangsortípus szintén `400`; elérhetetlen vagy megváltozott rangsorforrás `502` választ ad, látható hibaüzenettel és forráshivatkozással.
 A `has_metrics: true` jelzéshez teljes telemetriaminta szükséges; hiányos külső frissítés `400` hibát kap. Későbbi részleges frissítés megtartja a már érvényes minta mérési állapotát.
+
+### AI-rangsor adatforrások
+
+A kiválasztott rangsor betöltéskor, rangsorváltáskor és a frissítés gombbal kér új adatot. A források mérőszámai külön rangsorok; a dashboard nem egyesíti őket, és nem állítja, hogy a Digitalis-Agy azonos feltételekkel mért eredményei már összehasonlíthatók.
+Az első megnyitáskor a BenchLM van kiválasztva, így az elérhető rangsoradatok azonnal látszanak.
+
+| Forrás | Lekérési mód | Adat és megjegyzés |
+|---|---|---|
+| [Arena Text / Chatbot Arena](https://arena.ai/leaderboard/chat/text) | A nyilvános oldal lekérése és feldolgozása, mert nincs használt gépi API | A forrás oldalának dátumát, rangját, ratingjét és konfidenciaintervallumát mutatja. Ha a forrás HTTP 403-at ad vagy megváltozik az oldal formátuma, ezt a UI jelzi; nem mutat üres, sikeres frissítést. |
+| [BenchLM adatletöltés](https://benchlm.ai/data) | Hivatalos JSON-letöltés (`leaderboard.json`) | BenchAlign v5 rangsor. CC BY-NC 4.0; kizárólag nem kereskedelmi felhasználásra, „Data from BenchLM.ai” megjelöléssel és forráshivatkozással. Kereskedelmi megjelenítéshez külön engedély kell. |
+| [Epoch AI ECI](https://epoch.ai/eci) | Hivatalos ECI CSV | Epoch Capabilities Index pontszámok és intervallumok. CC BY 4.0, Epoch AI forrásmegjelöléssel. |
+
+Az Arena oldal közvetlen szerveres letöltése egyes hálózatokon 403-mal letiltható; ilyenkor a hiba és a hivatalos forráslink látható marad, és a BenchLM/Epoch AI rangsorok ettől még külön lekérhetők.
 
 ## 8. Ellenőrzés és hibakeresés
 

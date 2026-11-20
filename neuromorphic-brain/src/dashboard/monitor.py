@@ -25,6 +25,8 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional
 
+from .leaderboards import LeaderboardFetchError, RANKING_TYPES, fetch_leaderboard
+
 
 WORKFLOW_CATALOG = [
     {
@@ -114,27 +116,6 @@ TRAINING_PARADIGMS = [
     },
 ]
 
-RANKING_TYPES = [
-    {
-        "id": "lmsys_arena_elo",
-        "name": "LMSYS Chatbot Arena",
-        "metric": "Elo / emberi preferencia",
-        "source_url": None,
-    },
-    {
-        "id": "benchlm",
-        "name": "BenchLM",
-        "metric": "Aggregált benchmark-eredmények",
-        "source_url": None,
-    },
-    {
-        "id": "epoch_ai",
-        "name": "Epoch AI",
-        "metric": "Számítási kapacitás, FLOPs és paraméterszám",
-        "source_url": None,
-    },
-]
-
 METRIC_SAMPLE_FIELDS = {
     "epoch",
     "epoch_target",
@@ -159,6 +140,9 @@ METRIC_SAMPLE_FIELDS = {
     "episodic_events_count",
     "semantic_concepts_count",
     "semantic_relations_count",
+    "world_model_transition_count",
+    "world_model_rollout_status",
+    "world_model_rollout_skip_reason",
 }
 
 
@@ -169,11 +153,34 @@ def get_dashboard_catalog() -> Dict[str, Any]:
         "paradigms": TRAINING_PARADIGMS,
         "ranking_types": [
             {
-                **{key: value for key, value in item.items() if key != "source_url"},
-                "source_configured": bool(item["source_url"]),
+                **{
+                    key: value
+                    for key, value in item.items()
+                    if key not in {"adapter", "fetch_url"}
+                },
+                "source_configured": bool(item["adapter"]),
             }
             for item in RANKING_TYPES
         ],
+    }
+
+
+def _leaderboard_error_payload(
+    ranking_id: str,
+    ranking: Dict[str, Any],
+    error: LeaderboardFetchError,
+) -> Dict[str, Any]:
+    return {
+        "status": "source_unavailable",
+        "type": ranking_id,
+        "name": ranking["name"],
+        "metric": ranking["metric"],
+        "rows": [],
+        "message": "Még nincs azonos mérőszámon mért, összehasonlítható Digitalis-Agy eredmény.",
+        "detail": str(error),
+        "source_url": ranking["source_url"],
+        "source_label": ranking["source_label"],
+        "attribution": ranking["attribution"],
     }
 
 
@@ -245,6 +252,12 @@ def build_dashboard_telemetry(
     data_source: str,
 ) -> Dict[str, Any]:
     state_vector = stats["state_vector"]
+    if stats["planned_action_sequence"] is not None:
+        rollout_status = "EXECUTED"
+    elif stats["rollout_skipped"]:
+        rollout_status = "SKIPPED"
+    else:
+        rollout_status = "NOT_REQUESTED"
     return {
         "has_metrics": True,
         "epoch": epoch,
@@ -272,6 +285,9 @@ def build_dashboard_telemetry(
         "episodic_events_count": agent.episodic_mem.num_events(),
         "semantic_concepts_count": agent.semantic_mem.num_concepts(),
         "semantic_relations_count": agent.semantic_mem.num_relations(),
+        "world_model_transition_count": int(stats["world_model_transition_count"]),
+        "world_model_rollout_status": rollout_status,
+        "world_model_rollout_skip_reason": stats["rollout_skip_reason"],
     }
 
 
@@ -317,6 +333,9 @@ class BrainStateMonitor:
             "episodic_events_count": 0,
             "semantic_concepts_count": 0,
             "semantic_relations_count": 0,
+            "world_model_transition_count": 0,
+            "world_model_rollout_status": "—",
+            "world_model_rollout_skip_reason": None,
             "has_metrics": False,
             "training_active": False,
             "training_status": "IDLE",
@@ -424,6 +443,9 @@ class BrainStateMonitor:
             "last_spike_count": 0,
             "connection_count": 0,
             "layer_activity": [],
+            "world_model_transition_count": 0,
+            "world_model_rollout_status": "—",
+            "world_model_rollout_skip_reason": None,
             "has_metrics": False,
             "training_active": True,
             "training_status": "RUNNING",
@@ -1090,6 +1112,18 @@ body{font-family:var(--font);color:var(--text);font-size:12px;overflow:hidden;di
         <span class="mr-label" style="display:block;margin-bottom:6px">Decision Route</span>
         <span class="badge badge-blue" id="badge-route">FAST_SYSTEM_1</span>
       </div>
+      <div class="memory-row">
+        <span class="mr-label">JEPA Rollout</span>
+        <span class="mr-value" id="mv-world-model-rollout">—</span>
+      </div>
+      <div class="memory-row">
+        <span class="mr-label">Rollout Skip Reason</span>
+        <span class="mr-value" id="mv-world-model-rollout-reason">—</span>
+      </div>
+      <div class="memory-row">
+        <span class="mr-label">Observed Transitions</span>
+        <span class="mr-value" id="mv-world-model-transitions">—</span>
+      </div>
 
     </div>
   </div>
@@ -1220,6 +1254,8 @@ body{font-family:var(--font);color:var(--text);font-size:12px;overflow:hidden;di
       <button class="ranking-action" id="refresh-ranking" type="button">↻ Adatok frissítése</button>
     </div>
     <div id="ranking-status" class="ranking-notice" role="status" aria-live="polite">Rangsorforrás betöltése…</div>
+    <a id="ranking-source-link" class="catalog-note" target="_blank" rel="noopener noreferrer" hidden></a>
+    <p id="ranking-attribution" class="catalog-note"></p>
     <h2 class="ranking-subheading" id="ranking-title">Aktuális rangsor</h2>
     <p class="catalog-note" id="ranking-metric"></p>
     <div class="ranking-table-wrap">
@@ -1442,6 +1478,14 @@ function applyState(d){
   document.getElementById('mv-semantic').textContent=hasMetrics?Number(d.semantic_concepts_count).toLocaleString():'—';
   document.getElementById('mv-relations').textContent=hasMetrics?Number(d.semantic_relations_count).toLocaleString():'—';
   document.getElementById('mv-working').textContent=hasMetrics?(d.working_memory_items?'ACTIVE':'EMPTY'):'—';
+  document.getElementById('mv-world-model-rollout').textContent=
+    hasMetrics?(d.world_model_rollout_status||'—'):'—';
+  document.getElementById('mv-world-model-rollout').title=
+    hasMetrics?(d.world_model_rollout_skip_reason||''):'';
+  document.getElementById('mv-world-model-rollout-reason').textContent=
+    hasMetrics?(d.world_model_rollout_skip_reason||'—'):'—';
+  document.getElementById('mv-world-model-transitions').textContent=
+    hasMetrics?Number(d.world_model_transition_count).toLocaleString():'—';
 
   // Badges
   const mode=hasMetrics?(d.behavioral_mode||'BALANCED'):'—';
@@ -1775,14 +1819,21 @@ async function loadLeaderboard(refresh){
       document.getElementById('ranking-metric').textContent='Mérőszám: '+data.metric;
       document.getElementById('digitalis-ranking-status').textContent=data.message;
       renderRankingRows(data.rows||[]);
+      const sourceLink=document.getElementById('ranking-source-link');
+      sourceLink.hidden=!data.source_url;
+      if(data.source_url){
+        sourceLink.href=data.source_url;
+        sourceLink.textContent='Forrás megnyitása: '+(data.source_label||data.name);
+      }
+      document.getElementById('ranking-attribution').textContent=data.attribution||'';
     }
     if(!response.ok){
       status.textContent=data.detail||'A rangsor frissítése nem sikerült.';
       return;
     }
-    status.textContent=data.status==='not_configured'
-      ?(data.source_status||'Még nincs hivatalos adatforrás beállítva.')
-      :'A rangsor frissült.';
+    status.textContent=data.status==='ready'
+      ?'A rangsor frissült'+(data.source_last_updated?' (forrásadat: '+data.source_last_updated+')':'')+'.'
+      :(data.source_status||'A rangsor betöltődött.');
   }catch(error){
     status.textContent='Nem sikerült elérni a rangsor API-t: '+error.message;
   }
@@ -1900,19 +1951,10 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             if ranking is None:
                 self._json({"status": "error", "detail": "Unknown ranking type."}, code=400)
                 return
-            self._json({
-                "type": ranking_id,
-                "name": ranking["name"],
-                "metric": ranking["metric"],
-                "status": "ready" if ranking["source_url"] else "not_configured",
-                "rows": [],
-                "message": "Még nincs összehasonlítható Digitalis-Agy eredmény.",
-                "source_status": (
-                    "Még nincs hivatalos adatforrás beállítva."
-                    if not ranking["source_url"]
-                    else "A hivatalos adatforrás be van állítva."
-                ),
-            })
+            try:
+                self._json(fetch_leaderboard(ranking_id))
+            except LeaderboardFetchError as exc:
+                self._json(_leaderboard_error_payload(ranking_id, ranking, exc), code=502)
 
         elif path == "/api/stream":
             self._sse_stream()
@@ -1971,29 +2013,18 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
         elif path == "/api/leaderboard/refresh":
             try:
                 data = json.loads(body)
+                if not isinstance(data, dict):
+                    raise ValueError("Request body must be a JSON object")
                 ranking_id = data.get("type")
                 ranking = next((item for item in RANKING_TYPES if item["id"] == ranking_id), None)
                 if ranking is None:
                     self._json({"status": "error", "detail": "Unknown ranking type."}, code=400)
-                elif not ranking["source_url"]:
-                    self._json({
-                        "status": "not_configured",
-                        "type": ranking_id,
-                        "name": ranking["name"],
-                        "metric": ranking["metric"],
-                        "rows": [],
-                        "message": "Még nincs összehasonlítható Digitalis-Agy eredmény.",
-                        "detail": (
-                            "Ehhez a rangsorhoz még nincs hivatalos URL beállítva. "
-                            "Frissítés előtt adj meg ellenőrzött forrást."
-                        ),
-                    }, code=409)
                 else:
-                    self._json({
-                        "status": "not_implemented",
-                        "detail": "The source adapter is not configured.",
-                    }, code=501)
-            except Exception as exc:
+                    try:
+                        self._json(fetch_leaderboard(ranking_id))
+                    except LeaderboardFetchError as exc:
+                        self._json(_leaderboard_error_payload(ranking_id, ranking, exc), code=502)
+            except (json.JSONDecodeError, ValueError) as exc:
                 self._json({"status": "error", "detail": str(exc)}, code=400)
 
         else:
@@ -2050,6 +2081,7 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 

@@ -4,6 +4,8 @@ import json
 import threading
 import torch
 import dashboard_app
+import src.dashboard.monitor as dashboard_monitor
+from src.dashboard.leaderboards import LeaderboardFetchError
 from src.dashboard.monitor import (
     BrainStateMonitor,
     build_dashboard_telemetry,
@@ -39,6 +41,9 @@ def test_brain_state_monitor_updates_and_ascii_render():
         "episodic_events_count": 14,
         "semantic_concepts_count": 6,
         "semantic_relations_count": 2,
+        "world_model_transition_count": 10,
+        "world_model_rollout_status": "EXECUTED",
+        "world_model_rollout_skip_reason": None,
         "log": "Test cognitive event executed successfully.",
     })
 
@@ -108,6 +113,7 @@ def test_dashboard_server_endpoints():
             assert 'id="view-lab"' in html
             assert 'id="prompt-help-dialog"' in html
             assert 'id="ranking-type"' in html
+            assert 'id="ranking-source-link"' in html
             assert "Math.random" not in html
             assert "requestAnimationFrame" not in html
             assert "BATCH ACCURACY" in html
@@ -115,6 +121,9 @@ def test_dashboard_server_endpoints():
             assert 'id="ms-acc">—</div>' in html
             assert 'id="gv-curiosity">—</span>' in html
             assert 'id="mv-episodic">—</span>' in html
+            assert 'id="mv-world-model-rollout">—</span>' in html
+            assert 'id="mv-world-model-rollout-reason">—</span>' in html
+            assert 'id="mv-world-model-transitions">—</span>' in html
 
         # GET /api/state (JSON)
         req_api = urllib.request.Request(f"{base_url}/api/state")
@@ -155,7 +164,23 @@ def test_dashboard_server_endpoints():
         server.server_close()
 
 
-def test_catalog_and_leaderboard_endpoints_report_supported_items_and_missing_sources():
+def test_catalog_and_leaderboard_endpoints_return_live_source_rows(monkeypatch):
+    def fake_fetch(ranking_id):
+        ranking = next(item for item in dashboard_monitor.RANKING_TYPES if item["id"] == ranking_id)
+        return {
+            "type": ranking_id,
+            "name": ranking["name"],
+            "metric": ranking["metric"],
+            "status": "ready",
+            "rows": [{"rank": 1, "model": "Test Model", "score": "42", "updated_at": "2026-11-20"}],
+            "message": "No comparable local result.",
+            "source_url": ranking["source_url"],
+            "source_label": ranking["source_label"],
+            "attribution": ranking["attribution"],
+            "source_last_updated": "2026-11-20",
+        }
+
+    monkeypatch.setattr(dashboard_monitor, "fetch_leaderboard", fake_fetch)
     server = start_dashboard_server(host="127.0.0.1", port=0)
     base_url = f"http://127.0.0.1:{server.server_address[1]}"
     try:
@@ -172,25 +197,50 @@ def test_catalog_and_leaderboard_endpoints_report_supported_items_and_missing_so
             "benchlm",
             "epoch_ai",
         }
-        assert all(not item["source_configured"] for item in catalog["ranking_types"])
+        assert all(item["source_configured"] for item in catalog["ranking_types"])
+        assert all(item["source_url"] for item in catalog["ranking_types"])
 
-        with urllib.request.urlopen(f"{base_url}/api/leaderboard?type=benchlm") as response:
+        with urllib.request.urlopen(f"{base_url}/api/leaderboard") as response:
             ranking = json.loads(response.read().decode("utf-8"))
-        assert ranking["status"] == "not_configured"
+        assert ranking["status"] == "ready"
         assert ranking["name"] == "BenchLM"
-        assert ranking["rows"] == []
+        assert ranking["type"] == "benchlm"
+        assert ranking["rows"][0]["model"] == "Test Model"
+        assert ranking["source_url"] == "https://benchlm.ai/data"
+        benchlm = next(item for item in dashboard_monitor.RANKING_TYPES if item["id"] == "benchlm")
+        assert ranking["attribution"] == benchlm["attribution"]
+        assert response.headers["Cache-Control"] == "no-store"
 
         refresh_request = urllib.request.Request(
             f"{base_url}/api/leaderboard/refresh",
             data=json.dumps({"type": "benchlm"}).encode("utf-8"),
             headers={"Content-Type": "application/json"},
         )
-        with pytest.raises(urllib.error.HTTPError) as error:
-            urllib.request.urlopen(refresh_request)
-        assert error.value.code == 409
-        refresh_result = json.loads(error.value.read().decode("utf-8"))
-        assert refresh_result["status"] == "not_configured"
+        with urllib.request.urlopen(refresh_request) as response:
+            refresh_result = json.loads(response.read().decode("utf-8"))
+        assert refresh_result["status"] == "ready"
         assert refresh_result["type"] == "benchlm"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_leaderboard_source_failure_is_visible_to_api_client(monkeypatch):
+    def fail_fetch(ranking_id):
+        raise LeaderboardFetchError("HTTP 403")
+
+    monkeypatch.setattr(dashboard_monitor, "fetch_leaderboard", fail_fetch)
+    server = start_dashboard_server(host="127.0.0.1", port=0)
+    base_url = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        with pytest.raises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(f"{base_url}/api/leaderboard?type=lmsys_arena_elo")
+        assert error.value.code == 502
+        result = json.loads(error.value.read().decode("utf-8"))
+        assert result["status"] == "source_unavailable"
+        assert result["detail"] == "HTTP 403"
+        assert result["source_url"] == "https://arena.ai/leaderboard/chat/text"
+        assert result["rows"] == []
     finally:
         server.shutdown()
         server.server_close()
@@ -346,6 +396,10 @@ def test_simulation_launcher_keeps_server_available_after_simulation(monkeypatch
                 "connection_count": 18304,
                 "process_cpu_load": 0.25,
                 "layer_activity": [[0.1] * 64, [0.2] * 128, [0.3] * 64, [0.4] * 10],
+                "world_model_transition_count": 0,
+                "rollout_skipped": True,
+                "rollout_skip_reason": "insufficient_observed_transitions",
+                "planned_action_sequence": None,
             }
 
         def sleep_and_consolidate(self):
@@ -463,6 +517,9 @@ def test_monitor_accepts_complete_telemetry_sample():
         "episodic_events_count": 1,
         "semantic_concepts_count": 0,
         "semantic_relations_count": 0,
+        "world_model_transition_count": 10,
+        "world_model_rollout_status": "EXECUTED",
+        "world_model_rollout_skip_reason": None,
         "has_metrics": True,
     }
 
@@ -511,6 +568,10 @@ def test_training_loop_uses_learning_rate_and_reports_completion(monkeypatch):
                 "connection_count": 18304,
                 "process_cpu_load": 0.3,
                 "layer_activity": [[0.1] * 64, [0.2] * 128, [0.3] * 64, [0.4] * 2],
+                "world_model_transition_count": 0,
+                "rollout_skipped": False,
+                "rollout_skip_reason": None,
+                "planned_action_sequence": None,
             }
 
         def start_background_consolidation(self, interval_seconds):
@@ -572,11 +633,15 @@ def test_dashboard_telemetry_maps_real_pipeline_metrics():
         "surprise": 0.12,
         "state_vector": [0.8, 0.25, 0.3, 0.4],
         "behavioral_mode": "CAUTIOUS",
-        "route": "SLOW_SYSTEM_2",
+        "route": "FAST_SYSTEM_1",
         "spike_count": 23,
         "connection_count": 18304,
         "process_cpu_load": 0.45,
         "layer_activity": [[0.1], [0.2], [0.3], [0.4, 0.6]],
+        "world_model_transition_count": 0,
+        "rollout_skipped": False,
+        "rollout_skip_reason": None,
+        "planned_action_sequence": None,
     }
 
     telemetry = build_dashboard_telemetry(
@@ -602,6 +667,54 @@ def test_dashboard_telemetry_maps_real_pipeline_metrics():
     assert telemetry["episodic_events_count"] == 8
     assert telemetry["semantic_concepts_count"] == 4
     assert telemetry["semantic_relations_count"] == 2
+    assert telemetry["world_model_transition_count"] == 0
+    assert telemetry["world_model_rollout_status"] == "NOT_REQUESTED"
+    assert telemetry["world_model_rollout_skip_reason"] is None
+
+
+def test_dashboard_telemetry_reports_skipped_world_model_rollout():
+    class FakeAgent:
+        working_mem = type("WorkingMemory", (), {"get": lambda self, key: None})()
+        episodic_mem = type("EpisodicMemory", (), {"num_events": lambda self: 0})()
+        semantic_mem = type(
+            "SemanticMemory",
+            (),
+            {
+                "num_concepts": lambda self: 0,
+                "num_relations": lambda self: 0,
+            },
+        )()
+
+    stats = {
+        "step": 1,
+        "loss": 1.0,
+        "accuracy": 0.1,
+        "surprise": 0.2,
+        "state_vector": [0.5, 0.1, 0.1, 0.2],
+        "behavioral_mode": "CAUTIOUS",
+        "route": "SLOW_SYSTEM_2",
+        "spike_count": 0,
+        "connection_count": 100,
+        "process_cpu_load": 0.2,
+        "layer_activity": [[0.1], [0.2], [0.3]],
+        "world_model_transition_count": 0,
+        "rollout_skipped": True,
+        "rollout_skip_reason": "insufficient_observed_transitions",
+        "planned_action_sequence": None,
+    }
+
+    telemetry = build_dashboard_telemetry(
+        stats,
+        FakeAgent(),
+        epoch=1,
+        epoch_target=1,
+        total_steps=1,
+        data_source="N-MNIST",
+    )
+
+    assert telemetry["last_route"] == "SLOW_SYSTEM_2"
+    assert telemetry["world_model_rollout_status"] == "SKIPPED"
+    assert telemetry["world_model_rollout_skip_reason"] == "insufficient_observed_transitions"
 
 
 @pytest.mark.parametrize(
