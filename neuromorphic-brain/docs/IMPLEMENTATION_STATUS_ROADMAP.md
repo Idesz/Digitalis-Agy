@@ -174,6 +174,15 @@ A projekt akkor tekinthető az eredeti elképzeléshez közelebbinek, ha a köve
 - [x] Online tanulás során új feladatra emlékezés és régi tudás visszaesésének mérése.
 - [x] Tanulási loss/pontosság, validációs checkpoint kiválasztása és külön teszteredmény reprodukálható parancssori futtatása.
 
+#### N-MNIST első teljes adatos tanítási kísérlet (2026-11-20)
+
+- Adatforrás: hivatalos N-MNIST; 60 000 train és 10 000 test minta, mind a tíz címkével.
+- Bemeneti alak: train `[60000, 16, 64]`, test `[10000, 16, 64]`; a két split külön maradt.
+- Letöltés/feldolgozás: train archívum kb. 965 MiB, test archívum kb. 162 MiB; feldolgozott fájl kb. 72,2 MB. Az adatfájlok lokálisak és Git-ignore alatt vannak.
+- Tanítás: az első teljes train epoch kb. 46 percet futott; átlagos tanító batch-pontosság 53,72%, átlagos meglepetés 0,0507.
+- Eredménykorlát: a futás felhasználói kérésre a külön tesztkiértékelés előtt leállt. N-MNIST teszt loss/pontosság és mentett modell-checkpoint nincs; a fenti pontosság kizárólag tanító batch-eredmény.
+- Következő lépés: az adatot tartalmazó gépen újraindítani a teljes mérést a [DASHBOARD_TRAINING_GUIDE.md](DASHBOARD_TRAINING_GUIDE.md) `--all-train --all-test` parancsával. Másik gépen az adatfájlok átmásolása vagy a teljes előkészítés újbóli futtatása szükséges.
+
 ### Fázis 5 – Termelési szintű üzemeltetés
 
 - [ ] Redis és Qdrant tartós kötetekkel.
