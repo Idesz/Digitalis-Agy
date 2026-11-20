@@ -194,6 +194,14 @@ def test_synaptic_graph_remains_stable_for_fifty_training_epochs():
             len(node.activation_history) <= 100
             for node in pipeline.synaptic_graph.nodes.values()
         )
+        max_edges = sum(
+            source_layer.out_features * target_layer.out_features
+            for source_layer, target_layer in zip(
+                pipeline.snn.layers,
+                pipeline.snn.layers[1:],
+            )
+        )
+        assert len(pipeline.synaptic_graph.edges) <= max_edges
     finally:
         torch.set_num_threads(original_num_threads)
 
@@ -214,7 +222,8 @@ def test_cautious_homeostasis_forces_system_two(monkeypatch):
 
     assert stats["behavioral_mode"] == "CAUTIOUS"
     assert stats["route"] == "SLOW_SYSTEM_2"
-    assert stats["rollout_skipped"] is False
+    assert stats["rollout_skipped"] is True
+    assert stats["rollout_skip_reason"] == "insufficient_observed_transitions"
 
 
 def test_resource_conservation_skips_world_model_rollout(monkeypatch):
@@ -239,6 +248,7 @@ def test_resource_conservation_skips_world_model_rollout(monkeypatch):
     assert stats["behavioral_mode"] == "CONSERVATION"
     assert stats["route"] == "SLOW_SYSTEM_2"
     assert stats["rollout_skipped"] is True
+    assert stats["rollout_skip_reason"] == "resource_conservation"
     assert stats["simulated_rollout_val"] is None
 
 
@@ -262,15 +272,25 @@ def test_predictive_surprise_escalates_route(monkeypatch):
         return SystemRoute.FAST, 0.1, {}
 
     monkeypatch.setattr(pipeline.router, "route", fast_route)
-    inputs = (torch.rand(2, 2, 4) > 0.8).float()
-    targets = torch.zeros(2, dtype=torch.long)
+    inputs = (torch.rand(5, 4, 4) > 0.8).float()
+    targets = torch.zeros(5, dtype=torch.long)
+    transition_actions = torch.zeros(5, 3, 5)
+    transition_actions[:, :, 0] = 1.0
 
-    stats = pipeline.process_batch(inputs, targets, train_step=False)
+    stats = pipeline.process_batch(
+        inputs,
+        targets,
+        train_step=True,
+        transition_actions=transition_actions,
+    )
 
     assert observed_router_args["uncertainty"] == pytest.approx(0.9)
     assert stats["prediction_escalated"] is True
     assert stats["route"] == "SLOW_SYSTEM_2"
-    assert stats["selected_world_model_action"] in (0, 1)
+    assert stats["world_model_transition_count"] == 15
+    assert stats["selected_world_model_action"] in range(5)
+    assert len(stats["planned_action_sequence"]) == 3
+    assert stats["simulated_rollout_risk"] is not None
 
 
 def test_pipeline_routes_using_task_context_and_semantic_dependencies(monkeypatch):

@@ -89,6 +89,8 @@ A ténylegesen kiválasztott forrás az első batch feldolgozása után a **DATA
 | Session semantic concepts / relations | Az aktív pipeline szemantikus gráfjának csomópont- és élmennyisége | Az aktuális munkamenet memóriája |
 | Training progress | `step / total_steps`, a tényleges dataloader batchjeiből számolva | Az epoch-jelző ettől külön az aktuális epochot mutatja |
 
+Az XOR, paritás és osztályozási adatbetöltők nem tartalmaznak akciókat, ezért önmagukban nem tanítják a JEPA akciófeltételes átmenetmodelljét; ezeken a feladatokon a System 2 rollout megfelelő megfigyelt átmenet nélkül kimarad. Környezeti integráció a `process_batch(..., transition_actions=...)` paraméteren keresztül adhatja át a megfigyelt, szomszédos időlépésekhez tartozó akciókat. A tervező csak legalább tíz ilyen átmenet után indul, és a javasolt műveletet nem hajtja végre.
+
 A chartok batchenként frissülnek. A neurális ábra nem használ véletlen tüskéket vagy mesterséges pulzálást; aktivitás hiányában „Waiting for telemetry” felirat jelenik meg.
 
 ## 6. Benchmarkok, tanítási paradigmák és rangsor

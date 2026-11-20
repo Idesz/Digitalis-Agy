@@ -26,9 +26,11 @@ from src.homeostasis.state_vector import HomeostaticState, BehavioralMode
 from src.predictive.residual_error import ResidualPredictiveModule
 from src.routing.cdr_router import CDRRouter, SystemRoute, TaskRoutingContext
 from src.world_model.jepa_simulator import JEPASimulator
+from src.world_model.planner import LatentBeamPlanner
 
 
 SYNAPTIC_PRUNE_INTERVAL = 100
+MIN_WORLD_MODEL_TRANSITIONS = 10
 
 
 def _normalized_process_cpu_load(cpu_time_delta: float, wall_time_delta: float) -> float:
@@ -52,6 +54,7 @@ class NeuromorphicCognitivePipeline:
         lr: float = 1e-3,
         prediction_escalation_threshold: float = 0.5,
         semantic_memory_path: Optional[str] = None,
+        action_dim: int = 5,
     ):
         if not 0.0 <= prediction_escalation_threshold <= 1.0:
             raise ValueError("prediction_escalation_threshold must be in [0, 1]")
@@ -61,6 +64,9 @@ class NeuromorphicCognitivePipeline:
         self.device = device or (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
         self.input_dim = input_dim
         self.num_classes = num_classes
+        if isinstance(action_dim, bool) or not isinstance(action_dim, int) or action_dim < 5:
+            raise ValueError("action_dim must be at least five for distinct planning candidates")
+        self.action_dim = action_dim
         self.prediction_escalation_threshold = prediction_escalation_threshold
         self.step = 0
 
@@ -92,10 +98,12 @@ class NeuromorphicCognitivePipeline:
         # Pillar 6: JEPA World Model
         self.world_model = JEPASimulator(
             latent_dim=hidden_dims[-1],
-            action_dim=num_classes,
+            action_dim=action_dim,
             hidden_dim=128,
         ).to(self.device)
         self.wm_optimizer = torch.optim.Adam(self.world_model.parameters(), lr=1e-3)
+        self.planner = LatentBeamPlanner(self.world_model)
+        self.world_model_transition_count = 0
         self._last_cpu_sample_time = time.process_time()
         self._last_wall_sample_time = time.perf_counter()
 
@@ -105,6 +113,7 @@ class NeuromorphicCognitivePipeline:
         targets: torch.Tensor,
         train_step: bool = True,
         routing_context: Optional[TaskRoutingContext] = None,
+        transition_actions: Optional[torch.Tensor] = None,
     ) -> Dict[str, Any]:
         """
         Executes a complete cognitive cycle over a batch of spatio-temporal inputs:
@@ -114,6 +123,22 @@ class NeuromorphicCognitivePipeline:
         if routing_context is not None and not isinstance(routing_context, TaskRoutingContext):
             raise TypeError("routing_context must be a TaskRoutingContext")
         batch_size, time_steps, _ = inputs.shape
+        if transition_actions is not None:
+            if not isinstance(transition_actions, torch.Tensor):
+                raise TypeError("transition_actions must be a torch.Tensor")
+            if time_steps < 2:
+                raise ValueError("transition_actions require at least two observed time steps")
+            expected_shape = (batch_size, max(time_steps - 1, 0), self.action_dim)
+            if tuple(transition_actions.shape) != expected_shape:
+                raise ValueError(
+                    f"transition_actions must have shape {expected_shape}"
+                )
+            if not torch.isfinite(transition_actions).all():
+                raise ValueError("transition_actions must contain only finite values")
+            transition_actions = transition_actions.to(
+                self.device,
+                dtype=next(self.world_model.parameters()).dtype,
+            )
         inputs = inputs.to(self.device)
         targets = targets.to(self.device)
 
@@ -164,12 +189,12 @@ class NeuromorphicCognitivePipeline:
         top_spikes = layer_spikes[-1].mean(dim=1)  # [batch_size, hidden_dims[-1]]
         latent_repr = top_spikes[0].detach().cpu().numpy().tolist()
 
-        if train_step and time_steps > 1:
-            observed_latents = layer_spikes[-1][0].detach()
-            current_latents = observed_latents[:-1]
-            next_latents = observed_latents[1:]
-            neutral_actions = current_latents.new_zeros(current_latents.shape[0], self.num_classes)
-            predicted_latents = self.world_model.predict_next_latent(current_latents, neutral_actions)
+        if train_step and transition_actions is not None:
+            observed_latents = layer_spikes[-1].detach()
+            current_latents = observed_latents[:, :-1].reshape(-1, self.world_model.latent_dim)
+            next_latents = observed_latents[:, 1:].reshape(-1, self.world_model.latent_dim)
+            actions = transition_actions.reshape(-1, self.action_dim)
+            predicted_latents = self.world_model.predict_next_latent(current_latents, actions)
             transition_loss = F.mse_loss(predicted_latents, next_latents)
             stability_targets = torch.exp(-torch.mean(
                 (next_latents - current_latents).pow(2),
@@ -177,9 +202,16 @@ class NeuromorphicCognitivePipeline:
                 keepdim=True,
             ))
             stability_loss = F.mse_loss(self.world_model.value_head(current_latents), stability_targets)
+            risk_targets = torch.mean(
+                (predicted_latents.detach() - next_latents).pow(2),
+                dim=-1,
+                keepdim=True,
+            ).clamp(0.0, 1.0)
+            risk_loss = F.mse_loss(self.world_model.risk_head(current_latents), risk_targets)
             self.wm_optimizer.zero_grad()
-            (transition_loss + stability_loss).backward()
+            (transition_loss + stability_loss + risk_loss).backward()
             self.wm_optimizer.step()
+            self.world_model_transition_count += current_latents.shape[0]
 
         # 3. CDR Decision Routing
         # Retrieve similar past memories to compute familiarity / correlation
@@ -223,18 +255,25 @@ class NeuromorphicCognitivePipeline:
 
         # 5. Conserve resources by skipping expensive rollouts under high load.
         simulated_rollout_val = None
+        simulated_rollout_risk = None
         selected_world_model_action = None
-        rollout_skipped = decision == SystemRoute.SLOW and mode == BehavioralMode.CONSERVATION
-        if decision == SystemRoute.SLOW and not rollout_skipped:
-            candidate_actions = torch.eye(self.num_classes, device=self.device)
-            candidate_actions = candidate_actions[:, None, :].expand(-1, 3, -1)
-            candidate_actions = candidate_actions.unsqueeze(0)
-            _, candidate_values = self.world_model.simulate_candidates(
-                top_spikes[:1].detach(),
-                candidate_actions,
-            )
-            selected_world_model_action = int(candidate_values[0].argmax().item())
-            simulated_rollout_val = float(candidate_values[0, selected_world_model_action].item())
+        planned_action_sequence = None
+        rollout_skip_reason = None
+        rollout_skipped = False
+        if decision == SystemRoute.SLOW:
+            if mode == BehavioralMode.CONSERVATION:
+                rollout_skipped = True
+                rollout_skip_reason = "resource_conservation"
+            elif self.world_model_transition_count < MIN_WORLD_MODEL_TRANSITIONS:
+                rollout_skipped = True
+                rollout_skip_reason = "insufficient_observed_transitions"
+            else:
+                candidates = self.planner.plan_candidates(top_spikes[:1].detach(), horizon=3)
+                selected_plan = candidates[0]
+                selected_world_model_action = selected_plan.action_indices[0]
+                simulated_rollout_val = selected_plan.predicted_value
+                simulated_rollout_risk = selected_plan.predicted_risk
+                planned_action_sequence = list(selected_plan.action_indices)
 
         # 6. Working Memory & Episodic Logging
         self.working_mem.put(
@@ -281,7 +320,11 @@ class NeuromorphicCognitivePipeline:
             "behavioral_mode": mode.value,
             "state_vector": self.homeostasis.vector,
             "simulated_rollout_val": simulated_rollout_val,
+            "simulated_rollout_risk": simulated_rollout_risk,
             "rollout_skipped": rollout_skipped,
+            "rollout_skip_reason": rollout_skip_reason,
+            "planned_action_sequence": planned_action_sequence,
+            "world_model_transition_count": self.world_model_transition_count,
             "prediction_escalated": prediction_escalated,
             "selected_world_model_action": selected_world_model_action,
         }

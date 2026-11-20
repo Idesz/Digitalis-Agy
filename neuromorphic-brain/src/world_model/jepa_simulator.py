@@ -46,6 +46,12 @@ class JEPASimulator(nn.Module):
             nn.Linear(hidden_dim // 2, 1),
             nn.Sigmoid(),
         )
+        self.risk_head = nn.Sequential(
+            nn.Linear(latent_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, 1),
+            nn.Sigmoid(),
+        )
 
     def predict_next_latent(self, latent_state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         """
@@ -137,3 +143,11 @@ class JEPASimulator(nn.Module):
             values.append(total_value)
 
         return trajectories, torch.cat(values, dim=1)
+
+    def estimate_trajectory_risk(self, trajectory: List[torch.Tensor]) -> torch.Tensor:
+        if not trajectory:
+            raise ValueError("trajectory must contain at least one latent state")
+        for state in trajectory:
+            if state.ndim != 2 or state.shape[1] != self.latent_dim:
+                raise ValueError(f"trajectory states must have shape [batch_size, {self.latent_dim}]")
+        return torch.stack([self.risk_head(state) for state in trajectory], dim=0).mean(dim=0)

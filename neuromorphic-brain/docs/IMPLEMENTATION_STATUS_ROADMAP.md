@@ -29,7 +29,7 @@ Ez a dokumentum a dokumentált célállapotot, a jelenlegi implementációt és 
 | Prediktív kódolás | PyTorch autoenkóder és meglepetési küszöb | Alapmodell megvan; Mamba SSM hiányzik |
 | CDR útvonalválasztás | Explicit feladatdomének, epizodikus hasonlóság és szemantikus entity/kapcsolat | Bizonytalanság-kalibráció és valós külső feladatmetaadat még szükséges |
 | Rendszer 1 / 2 architektúra | Elkülönült rövid és lassú router osztály | A Rendszer 2 még demonstratív |
-| JEPA világmodell | Tanítható látens átmenet- és értékfej | Prototípus; valódi akció- és környezetmodell hiányzik |
+| JEPA világmodell | Akciófeltételes tanulás megfigyelt átmenetekből, stabilitás-/kockázatfej és beam planner | A környezeti adatforrás és az eredményes terv valós környezetben történő validálása még hiányzik |
 | Webdashboard és API | Futtatható dashboard, telemetria és tanítási vezérlés | Helyi prototípusokra jól illeszkedik |
 | Konténeres infrastruktúra | Docker Compose brain-core, Redis és Qdrant | Megvalósult alaptelepítés |
 
@@ -111,8 +111,8 @@ Kapcsolódó dokumentáció:
 
 3. **A Rendszer 2 nem valódi tervezőmotor.**
    - A DualProcessRouter fix szöveges választ ad.
-   - Nincs MCTS vagy szimbolikus feladatlezárás.
-   - A JEPA nem cselekvésekből tanul meg környezeti dinamikát, hanem neutral vagy egyhot osztályjelöltekből.
+   - Akciófeltételes JEPA tanulás és kockázattal súlyozott beam search megvalósult; legalább tíz megfigyelt átmenet szükséges.
+   - A jelenlegi osztályozó-adatok nem tartalmaznak akciókat, ezért valós feladatokon csak külső környezeti átmenetek beadása után tervez.
    - Az egyik különálló JEPA sandbox nincs integrálva a fő döntési folyamatba.
 
 4. **A CDR valós bemenetei részben bekötöttek.**
@@ -155,10 +155,10 @@ A projekt akkor tekinthető az eredeti elképzeléshez közelebbinek, ha a köve
 
 ### Fázis 3 – Valódi Rendszer 2 és világmodell
 
-- [ ] Minimum 5–10 valóban eltérő akciójelölt.
-- [ ] Observált környezeti átmenetekkel betanított JEPA transition head.
-- [ ] Soklépéses rollout és stabilitás vagy kockázat alapú értékelés.
-- [ ] MCTS vagy dokumentált alternatív keresőmotor integrálása.
+- [x] Minimum 5 valóban eltérő első akciójelölt.
+- [x] Observált akciófeltételes átmenetekkel betanítható JEPA transition head; az osztálycímke nem akció.
+- [x] Soklépéses rollout tanult stabilitás- és predikciós kockázatfejjel.
+- [x] Kockázattal súlyozott beam search integrálva mint dokumentált alternatíva.
 - [ ] Szemantikus részgráf és epizodikus hasonlóság a tervező bemenetében.
 - [ ] A Rendszer 2 csak skálázott, mérhető bonyolultság és bizonytalanság esetén indul.
 

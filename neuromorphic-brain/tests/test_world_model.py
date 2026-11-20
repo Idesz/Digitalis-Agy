@@ -1,6 +1,7 @@
 import pytest
 import torch
 from src.world_model.jepa_simulator import JEPASimulator
+from src.world_model.planner import LatentBeamPlanner
 
 
 def test_jepa_single_step():
@@ -33,7 +34,7 @@ def test_jepa_virtual_rollout():
         assert state.shape == (batch_size, latent_dim)
     assert total_value.shape == (batch_size, 1)
 
-    loss = total_value.sum()
+    loss = total_value.sum() + jepa.estimate_trajectory_risk(trajectory).sum()
     loss.backward()
     for param in jepa.parameters():
         assert param.grad is not None
@@ -55,6 +56,22 @@ def test_jepa_simulates_and_scores_multiple_candidates():
     assert all(len(trajectory) == horizon for trajectory in trajectories)
     assert values.shape == (batch_size, candidates)
     assert torch.all((values >= 0.0) & (values <= horizon))
+    risks = model.estimate_trajectory_risk(trajectories[0])
+    assert risks.shape == (batch_size, 1)
+    assert torch.all((risks >= 0.0) & (risks <= 1.0))
+
+
+def test_latent_beam_planner_returns_distinct_first_actions_and_risk_scores():
+    model = JEPASimulator(latent_dim=4, action_dim=5, hidden_dim=8)
+    planner = LatentBeamPlanner(model, beam_width=2, risk_weight=0.25)
+
+    candidates = planner.plan_candidates(torch.zeros(1, 4), horizon=3)
+
+    assert len(candidates) == 5
+    assert {candidate.action_indices[0] for candidate in candidates} == set(range(5))
+    assert all(len(candidate.trajectory) == 3 for candidate in candidates)
+    assert all(0.0 <= candidate.predicted_risk <= 1.0 for candidate in candidates)
+    assert candidates[0].score >= candidates[-1].score
 
 
 @pytest.mark.parametrize(
