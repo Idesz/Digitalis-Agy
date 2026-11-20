@@ -340,23 +340,49 @@ def test_pipeline_routes_using_task_context_and_semantic_dependencies(monkeypatc
     )
     pipeline.semantic_mem.add_concept("entity_a", {"domain": "math"})
     pipeline.semantic_mem.add_concept("entity_b", {"domain": "safety"})
+    pipeline.semantic_mem.add_concept("action_3", {"action_index": 3})
     pipeline.semantic_mem.add_relation("entity_a", "entity_b", "depends_on")
+    pipeline.semantic_mem.add_relation(
+        "entity_a",
+        "action_3",
+        "suggests_action",
+        weight=0.8,
+    )
     event = EpisodicEvent(
         embedding=[1.0, 0.0],
-        context={"concept": "entity_a", "related_to": "entity_b", "domain": "vision"},
+        context={
+            "concept": "entity_a",
+            "related_to": "entity_b",
+            "domain": "vision",
+            "observed_action_index": 1,
+            "selected_world_model_action": 4,
+        },
     )
     monkeypatch.setattr(pipeline.episodic_mem, "search_similar", lambda *args, **kwargs: [(event, 0.9)])
+    pipeline.world_model_transition_count = 10
     observed = {}
 
     def capture_route(**kwargs):
         observed.update(kwargs)
-        return SystemRoute.FAST, 0.1, {}
+        return SystemRoute.SLOW, 0.9, {}
 
     monkeypatch.setattr(pipeline.router, "route", capture_route)
-    pipeline.process_batch(
+    original_plan_candidates = pipeline.planner.plan_candidates
+
+    def capture_plan_candidates(initial_latent, horizon=3, action_priors=None):
+        observed["action_priors"] = action_priors
+        return original_plan_candidates(
+            initial_latent,
+            horizon=horizon,
+            action_priors=action_priors,
+        )
+
+    monkeypatch.setattr(pipeline.planner, "plan_candidates", capture_plan_candidates)
+    stats = pipeline.process_batch(
         inputs=torch.zeros(1, 2, 4),
         targets=torch.zeros(1, dtype=torch.long),
         train_step=False,
+        transition_actions=torch.tensor([[[0.0, 0.0, 1.0, 0.0, 0.0]]]),
         routing_context=TaskRoutingContext(
             domains=("finance",),
             entity_ids=("entity_a",),
@@ -366,6 +392,44 @@ def test_pipeline_routes_using_task_context_and_semantic_dependencies(monkeypatc
     assert observed["correlation_strength"] == pytest.approx(0.9)
     assert observed["domain_crossing"] == pytest.approx(0.75)
     assert observed["stakeholder_count"] == 2
+    assert observed["action_priors"] == pytest.approx([0.0, 1.0, 0.0, 0.8 / 0.9, 0.0])
+    assert stats["planning_action_priors"] == pytest.approx(observed["action_priors"])
+    stored_event = pipeline.episodic_mem._fallback_store.all_events()[-1]
+    assert stored_event.context["observed_action_index"] == 2
+
+
+def test_fast_route_does_not_run_planner_when_model_is_ready(monkeypatch):
+    pipeline = NeuromorphicCognitivePipeline(
+        input_dim=4,
+        hidden_dims=[4],
+        num_classes=2,
+        device=torch.device("cpu"),
+    )
+    pipeline.world_model_transition_count = 10
+    monkeypatch.setattr(
+        pipeline.predictive,
+        "gated_loss",
+        lambda inputs: (torch.tensor(0.0), torch.tensor(0.1), False),
+    )
+    monkeypatch.setattr(
+        pipeline.router,
+        "route",
+        lambda **kwargs: (SystemRoute.FAST, 0.1, {}),
+    )
+    monkeypatch.setattr(
+        pipeline.planner,
+        "plan_candidates",
+        lambda *args, **kwargs: pytest.fail("Planner should not run on the fast route"),
+    )
+
+    stats = pipeline.process_batch(
+        inputs=torch.zeros(1, 2, 4),
+        targets=torch.zeros(1, dtype=torch.long),
+        train_step=False,
+    )
+
+    assert stats["route"] == "FAST_SYSTEM_1"
+    assert stats["planning_action_priors"] is None
 
 
 @pytest.mark.parametrize(

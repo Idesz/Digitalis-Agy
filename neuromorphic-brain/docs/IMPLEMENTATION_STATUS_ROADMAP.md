@@ -160,8 +160,8 @@ A projekt akkor tekinthető az eredeti elképzeléshez közelebbinek, ha a köve
 - [x] Observált akciófeltételes átmenetekkel betanítható JEPA transition head; az osztálycímke nem akció.
 - [x] Soklépéses rollout tanult stabilitás- és predikciós kockázatfejjel.
 - [x] Kockázattal súlyozott beam search integrálva mint dokumentált alternatíva.
-- [ ] Szemantikus részgráf és epizodikus hasonlóság a tervező bemenetében.
-- [ ] A Rendszer 2 csak skálázott, mérhető bonyolultság és bizonytalanság esetén indul.
+- [x] A releváns szemantikus `suggests_action` élek és hasonló epizódok akcióelőzetesként befolyásolják a tervező rangsorát.
+- [x] A Rendszer 2 indítását a normalizált CDR-küszöb, a bizonytalansági eszkaláció vagy a homeosztatikus óvatosság méri; gyors út és erőforrás-kímélő mód nem futtat rolloutot.
 - [x] A CDR méri a batch-ek közötti reprezentációváltozást, és 30 mintás bemelegedés után legfeljebb 256 korábbi pontszámhoz viszonyítva kalibrálja az anomáliapontszámot.
 
 ### Fázis 4 – Mérhető tanulási eredmény

@@ -74,6 +74,43 @@ def test_latent_beam_planner_returns_distinct_first_actions_and_risk_scores():
     assert candidates[0].score >= candidates[-1].score
 
 
+def test_latent_beam_planner_uses_memory_prior_for_first_action(monkeypatch):
+    model = JEPASimulator(latent_dim=4, action_dim=5, hidden_dim=8)
+    planner = LatentBeamPlanner(model, beam_width=1)
+    monkeypatch.setattr(
+        planner,
+        "_step",
+        lambda state, action: (state, torch.tensor(0.5), torch.tensor(0.0)),
+    )
+
+    candidates = planner.plan_candidates(
+        torch.zeros(1, 4),
+        horizon=1,
+        action_priors=[0.0, 0.0, 1.0, 0.0, 0.0],
+    )
+
+    assert candidates[0].action_indices == (2,)
+    assert candidates[0].score - candidates[1].score == pytest.approx(0.1)
+
+
+@pytest.mark.parametrize(
+    "priors",
+    [
+        [0.0, 1.0],
+        [0.0, 0.0, 0.0, 0.0, float("nan")],
+        [0.0, 0.0, 0.0, 0.0, 1.1],
+        [0.0, 0.0, 0.0, 0.0, True],
+    ],
+)
+def test_latent_beam_planner_rejects_invalid_memory_priors(priors):
+    planner = LatentBeamPlanner(
+        JEPASimulator(latent_dim=4, action_dim=5, hidden_dim=8),
+    )
+
+    with pytest.raises(ValueError, match="action_priors"):
+        planner.plan_candidates(torch.zeros(1, 4), action_priors=priors)
+
+
 @pytest.mark.parametrize(
     ("initial", "actions"),
     [

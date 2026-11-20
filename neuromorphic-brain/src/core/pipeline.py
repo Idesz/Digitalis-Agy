@@ -9,8 +9,9 @@ Integrates:
 6. JEPA World Model Simulation
 """
 
-from typing import Dict, Any, Optional
+import math
 import time
+from typing import Dict, Any, Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -27,7 +28,7 @@ from src.predictive.residual_error import ResidualPredictiveModule
 from src.routing.cdr_router import CDRRouter, SystemRoute, TaskRoutingContext
 from src.routing.uncertainty import RollingUncertaintyCalibrator, representation_drift
 from src.world_model.jepa_simulator import JEPASimulator
-from src.world_model.planner import LatentBeamPlanner
+from src.world_model.planner import LatentBeamPlanner, MAX_PLANNED_ACTIONS
 
 
 SYNAPTIC_PRUNE_INTERVAL = 100
@@ -142,6 +143,12 @@ class NeuromorphicCognitivePipeline:
                 self.device,
                 dtype=next(self.world_model.parameters()).dtype,
             )
+        observed_action_index = None
+        if transition_actions is not None:
+            last_action = transition_actions[0, -1]
+            is_binary_action = torch.all((last_action == 0.0) | (last_action == 1.0))
+            if is_binary_action and torch.count_nonzero(last_action).item() == 1:
+                observed_action_index = int(last_action.argmax().item())
         inputs = inputs.to(self.device)
         targets = targets.to(self.device)
 
@@ -273,6 +280,7 @@ class NeuromorphicCognitivePipeline:
         planned_action_sequence = None
         rollout_skip_reason = None
         rollout_skipped = False
+        planning_action_priors = None
         if decision == SystemRoute.SLOW:
             if mode == BehavioralMode.CONSERVATION:
                 rollout_skipped = True
@@ -281,7 +289,15 @@ class NeuromorphicCognitivePipeline:
                 rollout_skipped = True
                 rollout_skip_reason = "insufficient_observed_transitions"
             else:
-                candidates = self.planner.plan_candidates(top_spikes[:1].detach(), horizon=3)
+                planning_action_priors = self._planning_action_priors(
+                    similar_episodes,
+                    routing_context or TaskRoutingContext(),
+                )
+                candidates = self.planner.plan_candidates(
+                    top_spikes[:1].detach(),
+                    horizon=3,
+                    action_priors=planning_action_priors,
+                )
                 selected_plan = candidates[0]
                 selected_world_model_action = selected_plan.action_indices[0]
                 simulated_rollout_val = selected_plan.predicted_value
@@ -308,6 +324,9 @@ class NeuromorphicCognitivePipeline:
                 ),
                 "route": decision.value,
                 "related_to": f"parity_{targets[0].item() % 2}",
+                "observed_action_index": observed_action_index,
+                "selected_world_model_action": selected_world_model_action,
+                "planned_action_sequence": planned_action_sequence,
             },
             surprise=float(mean_surprise.item()),
         )
@@ -340,6 +359,7 @@ class NeuromorphicCognitivePipeline:
             "simulated_rollout_risk": simulated_rollout_risk,
             "rollout_skipped": rollout_skipped,
             "rollout_skip_reason": rollout_skip_reason,
+            "planning_action_priors": planning_action_priors,
             "planned_action_sequence": planned_action_sequence,
             "world_model_transition_count": self.world_model_transition_count,
             "prediction_escalated": prediction_escalated,
@@ -393,6 +413,9 @@ class NeuromorphicCognitivePipeline:
             concept = self.semantic_mem.get_concept(entity)
             if concept is None:
                 continue
+            if "action_index" in concept:
+                entities.discard(entity)
+                continue
             concept_domain = concept.get("domain", concept.get("category"))
             if isinstance(concept_domain, str) and concept_domain:
                 domains.add(concept_domain)
@@ -400,6 +423,7 @@ class NeuromorphicCognitivePipeline:
             node_domains = {
                 node["id"]: node["attrs"].get("domain", node["attrs"].get("category"))
                 for node in subgraph["nodes"]
+                if "action_index" not in node["attrs"]
             }
             entities.update(node_domains)
             domains.update(
@@ -421,3 +445,71 @@ class NeuromorphicCognitivePipeline:
         crossing_units = max(len(domains) - 1, len(cross_domain_relations))
         domain_crossing = min(crossing_units / 4.0, 1.0)
         return domain_crossing, max(1, len(entities))
+
+    def _planning_action_priors(
+        self,
+        similar_episodes: list[tuple[EpisodicEvent, float]],
+        context: TaskRoutingContext,
+    ) -> list[float]:
+        evidence = [0.0] * self.action_dim
+        candidate_count = min(self.action_dim, MAX_PLANNED_ACTIONS)
+        entities = set(context.entity_ids)
+
+        for event, similarity in similar_episodes:
+            if not math.isfinite(similarity):
+                raise ValueError("episodic similarity scores must be finite")
+            entities.update(
+                entity
+                for entity in (
+                    event.context.get("concept"),
+                    event.context.get("related_to"),
+                )
+                if isinstance(entity, str) and entity
+            )
+            action_index = event.context.get("observed_action_index")
+            if action_index is not None:
+                if (
+                    isinstance(action_index, bool)
+                    or not isinstance(action_index, int)
+                    or not 0 <= action_index < candidate_count
+                ):
+                    raise ValueError("episodic observed_action_index is invalid")
+                evidence[action_index] += max(0.0, min(float(similarity), 1.0))
+
+        for entity in entities:
+            subgraph = self.semantic_mem.query_subgraph(entity, depth=1)
+            node_attributes = {
+                node["id"]: node["attrs"]
+                for node in subgraph["nodes"]
+            }
+            for edge in subgraph["edges"]:
+                attributes = edge["attrs"]
+                if attributes.get("relation") != "suggests_action":
+                    continue
+                target_attributes = node_attributes[edge["target"]]
+                action_index = target_attributes.get("action_index")
+                weight = attributes.get("weight", 1.0)
+                if (
+                    isinstance(action_index, bool)
+                    or not isinstance(action_index, int)
+                    or not 0 <= action_index < candidate_count
+                ):
+                    raise ValueError(
+                        "suggests_action targets must define a valid action_index"
+                    )
+                if (
+                    isinstance(weight, bool)
+                    or not isinstance(weight, (int, float))
+                    or not math.isfinite(weight)
+                    or not 0.0 <= weight <= 1.0
+                ):
+                    raise ValueError("suggests_action weights must be finite numbers in [0, 1]")
+                evidence[action_index] += float(weight)
+
+        maximum = max(evidence[:candidate_count], default=0.0)
+        if maximum == 0.0:
+            return evidence
+        return [
+            score / maximum if index < candidate_count else 0.0
+            for index, score in enumerate(evidence)
+        ]

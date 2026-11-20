@@ -1,7 +1,8 @@
 """Risk-aware beam search over discrete latent action rollouts."""
 
 from dataclasses import dataclass
-from typing import List
+import math
+from typing import List, Optional, Sequence
 
 import torch
 
@@ -9,6 +10,7 @@ from src.world_model.jepa_simulator import JEPASimulator
 
 
 MAX_PLANNED_ACTIONS = 10
+MEMORY_PRIOR_WEIGHT = 0.1
 
 
 @dataclass(frozen=True)
@@ -38,6 +40,7 @@ class LatentBeamPlanner:
         self,
         initial_latent: torch.Tensor,
         horizon: int = 3,
+        action_priors: Optional[Sequence[float]] = None,
     ) -> List[PlannedActionSequence]:
         if initial_latent.ndim != 2 or initial_latent.shape[0] != 1:
             raise ValueError("initial_latent must contain exactly one batch state")
@@ -45,6 +48,21 @@ class LatentBeamPlanner:
             raise ValueError(f"initial_latent must have shape [1, {self.model.latent_dim}]")
         if horizon < 1:
             raise ValueError("horizon must be positive")
+        if action_priors is None:
+            normalized_priors = [0.0] * self.model.action_dim
+        else:
+            if len(action_priors) != self.model.action_dim:
+                raise ValueError(f"action_priors must contain {self.model.action_dim} values")
+            normalized_priors = []
+            for prior in action_priors:
+                if (
+                    isinstance(prior, bool)
+                    or not isinstance(prior, (int, float))
+                    or not math.isfinite(prior)
+                    or not 0.0 <= prior <= 1.0
+                ):
+                    raise ValueError("action_priors values must be finite numbers in [0, 1]")
+                normalized_priors.append(float(prior))
 
         candidates = []
         with torch.no_grad():
@@ -83,13 +101,25 @@ class LatentBeamPlanner:
                     trajectory=tuple(trajectory),
                     predicted_value=float(predicted_value.item()),
                     predicted_risk=float(predicted_risk.item()),
-                    score=self._score(total_value, total_risk, horizon),
+                    score=(
+                        self._score(total_value, total_risk, horizon)
+                        + MEMORY_PRIOR_WEIGHT * normalized_priors[first_action]
+                    ),
                 ))
 
         return sorted(candidates, key=lambda candidate: candidate.score, reverse=True)
 
-    def plan(self, initial_latent: torch.Tensor, horizon: int = 3) -> PlannedActionSequence:
-        return self.plan_candidates(initial_latent, horizon=horizon)[0]
+    def plan(
+        self,
+        initial_latent: torch.Tensor,
+        horizon: int = 3,
+        action_priors: Optional[Sequence[float]] = None,
+    ) -> PlannedActionSequence:
+        return self.plan_candidates(
+            initial_latent,
+            horizon=horizon,
+            action_priors=action_priors,
+        )[0]
 
     def _step(self, state: torch.Tensor, action_index: int):
         action = state.new_zeros(state.shape[0], self.model.action_dim)
