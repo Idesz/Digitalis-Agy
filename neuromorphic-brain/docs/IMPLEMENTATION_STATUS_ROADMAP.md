@@ -22,9 +22,9 @@ Ez a dokumentum a dokumentált célállapotot, a jelenlegi implementációt és 
 | AdaMax helyi optimizálás | Megvalósítva rétegenként | Megvalósult |
 | Szinaptikus gráf és Hebb-pruning | DECOLLE együttaktivitás, JSON checkpoint, 100 lépésenkénti pruning | A fő funkciók megvannak; a hosszabb benchmark és nagy hálózatos skálázás további validációt igényel |
 | Munkamemória | Redis + szálbiztos in-memory fallback | Megvalósult |
-| Epizodikus memória | Qdrant + in-memory fallback | Alapfunkciók megvalósultak |
-| Szemantikus memória | NetworkX irányított gráf | Folyamatbeli prototípus; tartós tárolás hiányzik |
-| Alvási konszolidáció | Egyszerű epizód-összegzés és driftvédő | Klaszterezés és háttérworker hiányzik |
+| Epizodikus memória | Qdrant + in-memory fallback, szerveroldali visszakeresés és redundáns eseménytörlés | Alapfunkciók megvalósultak |
+| Szemantikus memória | NetworkX irányított gráf, verziózott JSON mentés/betöltés | Tartósság megvan; a konkurens többfolyamatos írás további megoldást igényel |
+| Alvási konszolidáció | Cosine-klaszterezés, redundanciaszűrés, driftvédelem és időzített háttérworker | A memóriafolyamatok egy példányon belül működnek; többfolyamatos ütemezés hiányzik |
 | Globális homeosztázis | Négy belső állapot és viselkedési mód | Megvalósult prototípus |
 | Prediktív kódolás | PyTorch autoenkóder és meglepetési küszöb | Alapmodell megvan; Mamba SSM hiányzik |
 | CDR útvonalválasztás | Súlyozott, validált négydimenziós router | A fő bemenetek jelentős része még kiegészítésre szorul |
@@ -104,10 +104,10 @@ Kapcsolódó dokumentáció:
    - Az 50 epochos kis CPU stabilitásteszt lefedi a súlyok, élek és aktivitáselőzmények alapvető korlátait; nagy hálózatos benchmark még szükséges.
 
 2. **Az alvási konszolidáció nem elosztott és nem teljes.**
-   - Hiányzik az epizodikus hasonlósági klaszterezés.
-   - Hiányzik a koszinusz küszöbön alapuló redundanciaszűrés.
-   - Hiányzik a felesleges epizódok végleges törlése.
-   - Nincs időzített vagy ütemezett NREM/REM háttérfolyamat.
+   - A 0.85 alapértelmezett cosine-küszöbű epizódklaszterezés és konfigurálható kor-/meglepetésszűrő megvalósult.
+   - Konszolidált hasonló klaszterben egy reprezentatív epizód marad; redundáns Qdrant/in-memory bejegyzések törlődnek.
+   - A szemantikus gráf verziózott JSON-checkpointból visszaállítható és a pipeline konszolidáció után automatikusan menti.
+   - Időzített, leállítható háttérworker elérhető és a tanítási belépési pontok indítják.
 
 3. **A Rendszer 2 nem valódi tervezőmotor.**
    - A DualProcessRouter fix szöveges választ ad.
@@ -120,14 +120,13 @@ Kapcsolódó dokumentáció:
    - A domain-crossing becslése csak batch-pontosságon alapul.
    - A router nem olvas valós szemantikus részgráfot vagy entitásfüggőséget.
 
-5. **A szemantikus tudás nem tartós.**
-   - A NetworkX gráf processzciklusonként újratelepülhet.
-   - Hiányzik a verziózott vagy különálló Graph Database / szerveres tároló.
+5. **A szemantikus tudás tartós, de nem elosztott.**
+   - Verziózott JSON checkpointból betöltődik, és konszolidáció után atomi fájlcserével mentődik.
+   - A különálló Graph Database / konkurens többfolyamatos írás még hiányzik.
 
 ### 4.2 Jelentős hiányosságok
 
 - Nincs Mamba vagy más dokumentált állapottérmodell a prediktív modulban.
-- Qdrant kapcsolaton elérhető események esetén a `retrieve_recent()` nem olvas direkt a szerverből.
 - Hiányzik a reprezentációk időbeli változását mérő, kalibrált bizonytalanság.
 - A memória-, router- és JEPA-módosítások nem rendelkeznek felülírási és visszaállítási szabályzattal.
 - Az épített benchmarkkatalógus nem tartalmaz valódi MMLU, HumanEval, GSM8K vagy MATH adaptert.
@@ -148,12 +147,12 @@ A projekt akkor tekinthető az eredeti elképzeléshez közelebbinek, ha a köve
 
 ### Fázis 2 – Valódi memória konszolidáció
 
-- [ ] Epizodikus események cosine vagy beágyazás-alapú klaszterezése.
-- [ ] 0.85 körüli hasonlósági küszöbön egyetlen absztrakt fogalommá vonás.
-- [ ] Konfigurálható redundancia-, életkor- és relevanciaszűrés.
-- [ ] Szemantikus gráf tartós tárolása és betöltése.
-- [ ] Környezetfüggetlen, időzített háttérworker.
-- [ ] Drift-rejekció mérhető identitás- vagy referenciavektor ellen.
+- [x] Epizodikus események cosine vagy beágyazás-alapú klaszterezése.
+- [x] 0.85 körüli hasonlósági küszöbön egyetlen absztrakt fogalommá vonás.
+- [x] Konfigurálható redundancia-, életkor- és relevanciaszűrés.
+- [x] Szemantikus gráf tartós tárolása és betöltése.
+- [x] Környezetfüggetlen, időzített háttérworker.
+- [x] Drift-rejekció mérhető identitás- vagy referenciavektor ellen.
 
 ### Fázis 3 – Valódi Rendszer 2 és világmodell
 

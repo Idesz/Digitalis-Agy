@@ -16,6 +16,7 @@ services:
       - REDIS_PORT=6379
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
+      - SEMANTIC_MEMORY_PATH=/app/data/semantic_memory.json
     ports:
       - "8000:8000"
     volumes:

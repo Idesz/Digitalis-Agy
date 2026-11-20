@@ -64,7 +64,15 @@ def run_simulation(
                 time.sleep(1.0)
 
         print("[*] Instantiating Pipeline for Live Telemetry Stream...")
-        agent = NeuromorphicCognitivePipeline(input_dim=64, hidden_dims=[128, 64], num_classes=10)
+        agent = NeuromorphicCognitivePipeline(
+            input_dim=64,
+            hidden_dims=[128, 64],
+            num_classes=10,
+            semantic_memory_path=os.environ.get(
+                "SEMANTIC_MEMORY_PATH",
+                os.path.join(os.path.dirname(__file__), "data", "semantic_memory.json"),
+            ),
+        )
         loader = get_neuromorphic_dataloader(
             batch_size=16,
             num_samples=160,

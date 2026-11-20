@@ -58,6 +58,10 @@ class InMemoryVectorStore:
     def all_events(self) -> List[EpisodicEvent]:
         return list(self.events.values())
 
+    def delete(self, event_ids: List[str]) -> None:
+        for event_id in event_ids:
+            self.events.pop(event_id, None)
+
 
 class EpisodicMemory:
     """
@@ -169,13 +173,77 @@ class EpisodicMemory:
     def retrieve_recent(self, limit: int = 100) -> List[EpisodicEvent]:
         if limit < 0:
             raise ValueError("limit must be non-negative")
+        if limit == 0:
+            return []
+        if self.is_qdrant_connected and self._qdrant_client is not None:
+            try:
+                events = []
+                offset = None
+                while True:
+                    points, next_offset = self._qdrant_client.scroll(
+                        collection_name=self.collection_name,
+                        limit=256,
+                        offset=offset,
+                        with_payload=True,
+                        with_vectors=True,
+                    )
+                    for point in points:
+                        payload = point.payload or {}
+                        if point.vector is None:
+                            raise ValueError(f"Qdrant event {point.id!r} is missing its vector")
+                        event = EpisodicEvent(
+                            event_id=str(point.id),
+                            timestamp=payload.get("timestamp", 0.0),
+                            embedding=point.vector,
+                            context=payload.get("context", {}),
+                            surprise=payload.get("surprise", 0.0),
+                        )
+                        self._validate_vector(event.embedding)
+                        events.append(event)
+                        self._fallback_store.insert(event)
+                    if next_offset is None:
+                        break
+                    offset = next_offset
+                events.sort(key=lambda event: event.timestamp, reverse=True)
+                return events[:limit]
+            except Exception:
+                logger.exception("Qdrant episodic retrieval failed; switching to in-memory storage")
+                self.is_qdrant_connected = False
         events = self._fallback_store.all_events()
         events.sort(key=lambda x: x.timestamp, reverse=True)
         return events[:limit]
 
     def num_events(self) -> int:
-        """Returns the total number of events mirrored in the local store."""
+        """Returns the number of events in the active episodic store."""
+        if self.is_qdrant_connected and self._qdrant_client is not None:
+            try:
+                return int(
+                    self._qdrant_client.count(
+                        collection_name=self.collection_name,
+                        exact=True,
+                    ).count
+                )
+            except Exception:
+                logger.exception("Qdrant episodic count failed; switching to in-memory storage")
+                self.is_qdrant_connected = False
         return len(self._fallback_store.events)
+
+    def delete_events(self, event_ids: List[str]) -> None:
+        if not event_ids:
+            return
+        if self.is_qdrant_connected and self._qdrant_client is not None:
+            try:
+                from qdrant_client.models import PointIdsList
+
+                self._qdrant_client.delete(
+                    collection_name=self.collection_name,
+                    points_selector=PointIdsList(points=event_ids),
+                    wait=True,
+                )
+            except Exception as exc:
+                logger.exception("Failed to delete consolidated events from Qdrant")
+                raise RuntimeError("Could not delete redundant episodic events from Qdrant") from exc
+        self._fallback_store.delete(event_ids)
 
     def _validate_vector(self, vector: List[float]) -> None:
         if len(vector) != self.vector_dim:

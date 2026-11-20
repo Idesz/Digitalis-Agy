@@ -430,6 +430,7 @@ class BrainStateMonitor:
             "log": f"Training started: {prompt[:60]}",
         })
         final_status = "COMPLETED"
+        agent = None
         try:
             # Import here to avoid circular imports at module load time
             project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -445,6 +446,15 @@ class BrainStateMonitor:
                 hidden_dims=[128, 64],
                 num_classes=num_classes,
                 lr=lr,
+                semantic_memory_path=os.environ.get(
+                    "SEMANTIC_MEMORY_PATH",
+                    os.path.join(project_root, "data", "semantic_memory.json"),
+                ),
+            )
+            agent.start_background_consolidation(
+                interval_seconds=float(
+                    os.environ.get("SLEEP_CONSOLIDATION_INTERVAL_SECONDS", "3600")
+                )
             )
             loader = get_neuromorphic_dataloader(
                 batch_size=batch_size,
@@ -497,6 +507,12 @@ class BrainStateMonitor:
             final_status = "ERROR"
             self.update({"log": f"[ERROR] Training failed: {exc}", "training_status": "ERROR"})
         finally:
+            if agent is not None:
+                try:
+                    agent.stop_background_consolidation()
+                except Exception as exc:
+                    final_status = "ERROR"
+                    self.update({"log": f"[ERROR] Sleep worker failed: {exc}"})
             self.update({"training_active": False, "training_status": final_status})
 
     # ------------------------------------------------------------------

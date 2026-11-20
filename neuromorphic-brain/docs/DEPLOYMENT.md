@@ -25,6 +25,12 @@ cd neuromorphic-brain
 docker compose up --build -d
 ```
 
+The Compose stack stores the semantic graph at `/app/data/semantic_memory.json`
+and mounts `./data` into the container. Native runs can set
+`SEMANTIC_MEMORY_PATH` to choose another persistent checkpoint location.
+`SLEEP_CONSOLIDATION_INTERVAL_SECONDS` controls the background consolidation
+interval (default: 3600 seconds); epoch-boundary consolidation remains enabled.
+
 ### Checking Services Status
 ```bash
 docker compose ps

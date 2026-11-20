@@ -512,6 +512,12 @@ def test_training_loop_uses_learning_rate_and_reports_completion(monkeypatch):
                 "layer_activity": [[0.1] * 64, [0.2] * 128, [0.3] * 64, [0.4] * 2],
             }
 
+        def start_background_consolidation(self, interval_seconds):
+            pass
+
+        def stop_background_consolidation(self):
+            pass
+
         def sleep_and_consolidate(self):
             return {"consolidated_concepts": 0}
 

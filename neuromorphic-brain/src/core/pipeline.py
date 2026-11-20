@@ -9,7 +9,7 @@ Integrates:
 6. JEPA World Model Simulation
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import time
 import torch
 import torch.nn as nn
@@ -51,6 +51,7 @@ class NeuromorphicCognitivePipeline:
         device: torch.device = None,
         lr: float = 1e-3,
         prediction_escalation_threshold: float = 0.5,
+        semantic_memory_path: Optional[str] = None,
     ):
         if not 0.0 <= prediction_escalation_threshold <= 1.0:
             raise ValueError("prediction_escalation_threshold must be in [0, 1]")
@@ -72,7 +73,7 @@ class NeuromorphicCognitivePipeline:
         # Pillar 2: Memory hierarchy
         self.working_mem = WorkingMemory()
         self.episodic_mem = EpisodicMemory(vector_dim=hidden_dims[-1])
-        self.semantic_mem = SemanticMemory()
+        self.semantic_mem = SemanticMemory(storage_path=semantic_memory_path)
         self.sleep_worker = SleepConsolidator(
             episodic_memory=self.episodic_mem,
             semantic_memory=self.semantic_mem,
@@ -276,6 +277,12 @@ class NeuromorphicCognitivePipeline:
     def sleep_and_consolidate(self) -> Dict[str, int]:
         """Runs offline sleep consolidation cycle."""
         return self.sleep_worker.consolidate()
+
+    def start_background_consolidation(self, interval_seconds: float = 3600.0) -> None:
+        self.sleep_worker.start_background(interval_seconds)
+
+    def stop_background_consolidation(self, timeout: Optional[float] = None) -> None:
+        self.sleep_worker.stop_background(timeout)
 
     def _record_synaptic_coactivations(self, layer_spikes: list[torch.Tensor]) -> None:
         for layer_index, (source_spikes, target_spikes) in enumerate(

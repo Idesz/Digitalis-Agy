@@ -56,6 +56,13 @@ def main():
         num_classes=num_classes,
         device=device,
         lr=2e-3,
+        semantic_memory_path=os.environ.get(
+            "SEMANTIC_MEMORY_PATH",
+            os.path.join("data", "semantic_memory.json"),
+        ),
+    )
+    agent.start_background_consolidation(
+        interval_seconds=float(os.environ.get("SLEEP_CONSOLIDATION_INTERVAL_SECONDS", "3600"))
     )
     print("    [Pillar 1] DECOLLE Local Plasticity LIF Network: READY")
     print("    [Pillar 2] Hierarchical Memory & Sleep Engine:   READY")
@@ -119,6 +126,7 @@ def main():
     print("  🌙 ENTERING SLEEP CONSOLIDATION PHASE (NREM/REM Simulation)")
     print("=" * 70)
     consolidation_stats = agent.sleep_and_consolidate()
+    agent.stop_background_consolidation()
     print(f"[*] Episodic traces processed: {consolidation_stats['processed_events']}")
     print(f"[*] Concepts integrated into Semantic Graph: {consolidation_stats['consolidated_concepts']}")
     print(f"[*] Relational links established: {consolidation_stats['consolidated_relations']}")

@@ -1,5 +1,6 @@
 import pytest
 import time
+import threading
 import numpy as np
 import sys
 from types import SimpleNamespace
@@ -100,6 +101,41 @@ def test_episodic_memory_validates_vectors_and_limits():
     assert memory.search_similar([1.0, 0.0], limit=0) == []
 
 
+def test_episodic_memory_retrieves_and_deletes_qdrant_events():
+    class FakeQdrant:
+        def __init__(self):
+            self.points = [
+                SimpleNamespace(id=f"event_{timestamp}", payload={"timestamp": timestamp}, vector=[1.0, 0.0])
+                for timestamp in (1.0, 3.0, 2.0)
+            ]
+
+        def scroll(self, collection_name, limit, offset, with_payload, with_vectors):
+            start = offset or 0
+            page = self.points[start : start + 2]
+            next_offset = start + len(page) if start + len(page) < len(self.points) else None
+            return page, next_offset
+
+        def count(self, collection_name, exact):
+            return SimpleNamespace(count=len(self.points))
+
+        def delete(self, collection_name, points_selector, wait):
+            ids = set(points_selector.points)
+            self.points = [point for point in self.points if point.id not in ids]
+
+    memory = EpisodicMemory(vector_dim=2, force_fallback=True)
+    client = FakeQdrant()
+    memory._qdrant_client = client
+    memory.is_qdrant_connected = True
+
+    recent = memory.retrieve_recent(limit=2)
+    assert [event.timestamp for event in recent] == [3.0, 2.0]
+    assert memory.num_events() == 3
+
+    memory.delete_events(["event_2.0"])
+    assert memory.num_events() == 2
+    assert "event_2.0" not in memory._fallback_store.events
+
+
 def test_semantic_memory_knowledge_graph():
     sm = SemanticMemory()
     sm.add_concept("digit_zero", {"type": "number", "parity": "even"})
@@ -119,6 +155,22 @@ def test_semantic_memory_knowledge_graph():
     assert attrs == {"source": "caller"}
     with pytest.raises(ValueError, match="depth must be non-negative"):
         sm.query_subgraph("digit_zero", depth=-1)
+
+
+def test_semantic_memory_checkpoint_round_trip(tmp_path):
+    checkpoint = tmp_path / "semantic" / "memory.json"
+    memory = SemanticMemory(storage_path=str(checkpoint))
+    memory.add_concept("concept_a", {"category": "math", "occurrences": 2})
+    memory.add_relation("concept_a", "concept_b", "associated_with", weight=0.75)
+    memory.save()
+
+    restored = SemanticMemory.load(str(checkpoint))
+
+    assert restored.get_concept("concept_a") == {"category": "math", "occurrences": 2}
+    assert restored.query_subgraph("concept_a")["edges"][0]["attrs"]["weight"] == 0.75
+    restored.graph.graph["worker_state"] = {"done": True}
+    restored.save()
+    assert SemanticMemory.load(str(checkpoint)).graph.graph["worker_state"] == {"done": True}
 
 
 def test_sleep_consolidator_rejects_mismatched_identity_anchor():
@@ -182,7 +234,9 @@ def test_sleep_consolidation_processes_events_beyond_one_batch():
     assert first_pass["processed_events"] == 3
     assert second_pass["processed_events"] == 3
     assert final_pass["processed_events"] == 1
-    assert sm.num_concepts() == 7
+    assert first_pass["redundant_events_removed"] == 2
+    assert sm.num_concepts() == 3
+    assert em.num_events() == 3
 
 
 def test_dynamic_identity_anchor_rejects_drifting_events():
@@ -205,3 +259,89 @@ def test_dynamic_identity_anchor_rejects_drifting_events():
     assert stats["rejected_for_drift"] == 1
     assert sm.get_concept("anchor") is not None
     assert sm.get_concept("drift") is None
+
+
+def test_sleep_consolidation_clusters_similar_events_and_filters_irrelevant_ones():
+    em = EpisodicMemory(vector_dim=3, force_fallback=True)
+    sm = SemanticMemory()
+    consolidator = SleepConsolidator(
+        em,
+        sm,
+        max_drift_threshold=1.0,
+        similarity_threshold=0.85,
+        min_surprise=0.2,
+    )
+    for event in (
+        EpisodicEvent(
+            embedding=[1.0, 0.0, 0.0],
+            context={"concept": "similar", "category": "vision", "related_to": "shape"},
+            surprise=0.3,
+        ),
+        EpisodicEvent(
+            embedding=[0.99, 0.1, 0.0],
+            context={"concept": "similar", "category": "vision", "related_to": "shape"},
+            surprise=0.7,
+        ),
+        EpisodicEvent(
+            embedding=[0.0, 1.0, 0.0],
+            context={"concept": "distinct", "category": "vision"},
+            surprise=0.5,
+        ),
+        EpisodicEvent(
+            embedding=[0.0, 0.0, 1.0],
+            context={"concept": "irrelevant"},
+            surprise=0.1,
+        ),
+    ):
+        em.store_event(event)
+
+    stats = consolidator.consolidate()
+
+    assert stats["consolidated_concepts"] == 2
+    assert stats["redundant_events_removed"] == 1
+    assert stats["filtered_events"] == 1
+    assert sm.get_concept("similar")["occurrences"] == 2
+    assert sm.get_concept("similar")["source_concepts"] == ["similar"]
+    assert em.num_events() == 2
+
+
+def test_sleep_consolidation_persists_processed_events_and_dynamic_anchor(tmp_path):
+    checkpoint = tmp_path / "semantic.json"
+    memory = EpisodicMemory(vector_dim=2, force_fallback=True)
+    semantic = SemanticMemory(storage_path=str(checkpoint))
+    memory.store_event(EpisodicEvent(
+        embedding=[1.0, 0.0],
+        context={"concept": "anchor"},
+    ))
+
+    SleepConsolidator(memory, semantic).consolidate()
+    restored_semantic = SemanticMemory.load(str(checkpoint))
+    restored = SleepConsolidator(memory, restored_semantic)
+
+    stats = restored.consolidate()
+    assert stats["processed_events"] == 0
+    assert restored.identity_anchor.tolist() == pytest.approx([1.0, 0.0])
+    assert restored_semantic.get_concept("anchor")["occurrences"] == 1
+
+
+def test_sleep_consolidator_background_worker_runs_and_stops():
+    completed = threading.Event()
+    memory = EpisodicMemory(vector_dim=2, force_fallback=True)
+    semantic = SemanticMemory()
+    memory.store_event(EpisodicEvent(
+        embedding=[1.0, 0.0],
+        context={"concept": "background"},
+    ))
+
+    class ObservedConsolidator(SleepConsolidator):
+        def consolidate(self, batch_size=50):
+            result = super().consolidate(batch_size)
+            completed.set()
+            return result
+
+    consolidator = ObservedConsolidator(memory, semantic)
+    consolidator.start_background(interval_seconds=0.01)
+    assert completed.wait(timeout=2.0)
+    consolidator.stop_background(timeout=2.0)
+
+    assert semantic.get_concept("background") is not None
