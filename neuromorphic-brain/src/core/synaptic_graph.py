@@ -4,6 +4,8 @@ Corresponds directly to Pillar 1 from software_and_code_specification.md.
 """
 
 from dataclasses import dataclass, field
+import json
+from pathlib import Path
 from typing import Dict, List, Optional
 import time
 
@@ -35,6 +37,84 @@ class SynapticGraphManager:
         self.learning_rate = learning_rate
         self.decay_factor = decay_factor
         self.initial_weight = initial_weight
+
+    def save_checkpoint(self, path: str) -> None:
+        checkpoint_path = Path(path)
+        temporary_path = checkpoint_path.with_name(checkpoint_path.name + ".tmp")
+        checkpoint = {
+            "version": 1,
+            "config": {
+                "learning_rate": self.learning_rate,
+                "decay_factor": self.decay_factor,
+                "initial_weight": self.initial_weight,
+            },
+            "nodes": {
+                node_id: {"activation_history": node.activation_history}
+                for node_id, node in self.nodes.items()
+            },
+            "edges": {
+                edge_key: {
+                    "source_id": edge.source_id,
+                    "target_id": edge.target_id,
+                    "weight": edge.weight,
+                    "last_activated": edge.last_activated,
+                }
+                for edge_key, edge in self.edges.items()
+            },
+        }
+        temporary_path.write_text(
+            json.dumps(checkpoint, allow_nan=False, sort_keys=True),
+            encoding="utf-8",
+        )
+        temporary_path.replace(checkpoint_path)
+
+    @classmethod
+    def load_checkpoint(cls, path: str) -> "SynapticGraphManager":
+        checkpoint = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(checkpoint, dict) or checkpoint.get("version") != 1:
+            raise ValueError("Unsupported synaptic graph checkpoint version")
+
+        try:
+            manager = cls(**checkpoint["config"])
+            nodes = checkpoint["nodes"]
+            edges = checkpoint["edges"]
+        except (KeyError, TypeError) as exc:
+            raise ValueError("Invalid synaptic graph checkpoint structure") from exc
+
+        if not isinstance(nodes, dict) or not isinstance(edges, dict):
+            raise ValueError("Checkpoint nodes and edges must be objects")
+
+        for node_id, node_data in nodes.items():
+            if not isinstance(node_id, str) or not isinstance(node_data, dict):
+                raise ValueError("Invalid synaptic graph node entry")
+            history = node_data.get("activation_history")
+            if not isinstance(history, list) or any(
+                not isinstance(timestamp, (int, float)) for timestamp in history
+            ):
+                raise ValueError(f"Invalid activation history for node {node_id!r}")
+            manager.nodes[node_id] = Node(node_id=node_id, activation_history=history)
+
+        for edge_key, edge_data in edges.items():
+            if not isinstance(edge_key, str) or not isinstance(edge_data, dict):
+                raise ValueError("Invalid synaptic graph edge entry")
+            try:
+                edge = Edge(
+                    source_id=edge_data["source_id"],
+                    target_id=edge_data["target_id"],
+                    weight=edge_data["weight"],
+                    last_activated=edge_data["last_activated"],
+                )
+            except (KeyError, TypeError) as exc:
+                raise ValueError(f"Invalid edge data for {edge_key!r}") from exc
+            if (
+                edge_key != f"{edge.source_id}->{edge.target_id}"
+                or edge.source_id not in manager.nodes
+                or edge.target_id not in manager.nodes
+            ):
+                raise ValueError(f"Inconsistent synaptic graph edge {edge_key!r}")
+            manager.edges[edge_key] = edge
+
+        return manager
 
     def add_node(self, node_id: str) -> None:
         if node_id not in self.nodes:

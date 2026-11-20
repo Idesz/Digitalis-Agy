@@ -43,6 +43,22 @@ def test_synaptic_graph_hebbian_learning_and_pruning():
     assert "neuron_A->neuron_B" not in sgm.edges
 
 
+def test_synaptic_graph_checkpoint_round_trip(tmp_path):
+    sgm = SynapticGraphManager(learning_rate=0.2, decay_factor=0.05, initial_weight=0.3)
+    sgm.record_coactivation("layer_0:neuron_1", "layer_1:neuron_2", timestamp=123.0)
+    checkpoint_path = tmp_path / "synaptic_graph.json"
+
+    sgm.save_checkpoint(str(checkpoint_path))
+    restored = SynapticGraphManager.load_checkpoint(str(checkpoint_path))
+
+    assert restored.learning_rate == 0.2
+    assert restored.decay_factor == 0.05
+    assert restored.initial_weight == 0.3
+    assert restored.nodes["layer_0:neuron_1"].activation_history == [123.0]
+    assert restored.edges["layer_0:neuron_1->layer_1:neuron_2"].weight == 0.3
+    assert restored.edges["layer_0:neuron_1->layer_1:neuron_2"].last_activated == 123.0
+
+
 def test_memory_hierarchy_and_sleep_consolidation():
     mhc = MemoryHierarchyController()
     mhc.write_working_memory("current_task", "compile_cortex")
