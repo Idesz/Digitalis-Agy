@@ -164,12 +164,12 @@ A projekt akkor tekinthető az eredeti elképzeléshez közelebbinek, ha a köve
 
 ### Fázis 4 – Mérhető tanulási eredmény
 
-- [ ] XOR és paritás mellett külön validációs és tesztelosztás.
-- [ ] Held-out pontosság és loss jelentése.
+- [x] XOR és paritás mellett külön validációs és tesztelosztás.
+- [x] Held-out pontosság és loss jelentése.
 - [ ] Valódi N-MNIST vagy más dokumentált adatforrás futtatása.
-- [ ] Benchmarkadapterek és ismételhető baseline eredmények.
-- [ ] Online tanulás során új feladatra emlékezés és régi tudás visszaesésének mérése.
-- [ ] Minden jelentős mérőszám definíciója és reprodukálható futtatási parancsa.
+- [ ] Külső benchmarkadapterek; a helyi XOR/paritás/klasszifikációs futásoknál reprodukálható többségi osztály baseline elérhető.
+- [x] Online tanulás során új feladatra emlékezés és régi tudás visszaesésének mérése.
+- [x] Tanulási loss/pontosság, validációs checkpoint kiválasztása és külön teszteredmény reprodukálható parancssori futtatása.
 
 ### Fázis 5 – Termelési szintű üzemeltetés
 

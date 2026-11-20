@@ -210,3 +210,5 @@ class JEPASimulator(nn.Module):
 - `GET /api/leaderboard?type=<id>` returns ranking metadata and available rows; `POST /api/leaderboard/refresh` reports HTTP 409 until a verified official source is configured. At present all ranking URLs are unset, and even a configured source needs an adapter before refresh can work. No ranking values are fabricated.
 
 See [DASHBOARD_TRAINING_GUIDE.md](DASHBOARD_TRAINING_GUIDE.md) for the UI, data provenance, metric semantics, workflow limitations, launch commands, and verification instructions in one place.
+
+The separate `benchmark.py` command creates seeded, disjoint train/validation/test splits for the local classification tasks, chooses a checkpoint by validation accuracy (validation loss breaks ties), and reports test metrics plus a majority-class baseline. `--measure-forgetting` trains XOR then parity sequentially and reports old-task test-accuracy decline; it does not claim support for external language-model benchmarks.

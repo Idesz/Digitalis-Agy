@@ -123,6 +123,16 @@ A `has_metrics: true` jelzéshez teljes telemetriaminta szükséges; hiányos k�
 
 ## 8. Ellenőrzés és hibakeresés
 
+Reprodukálható XOR/paritás/klasszifikációs train–validation–test méréshez:
+
+```powershell
+python benchmark.py --task xor --samples 256 --epochs 10 --seed 42
+python benchmark.py --measure-forgetting --samples 256 --epochs 5 --seed 42
+```
+
+A parancs az epochonkénti tanító- és validációs loss/pontosság mellett a legjobb validációs epoch után visszatöltött modell külön teszteredményét írja ki. A felejtési mérés az XOR teszteredményt a paritásra történő további tanítás előtt és után is közli. Ezek a feladatok szintetikusak; külső MMLU/HumanEval/GSM8K adaptert a parancs nem állít.
+Az eredmény baseline-ja a tanítókészlet többségi osztályát jósló osztályozó tesztpontossága. A felejtési érték egy korábban megtanult feladat tesztpontosságának legjobb korábbi mért értéke és a további feladatra tanítás utáni pontosság különbsége, negatív érték nélkül.
+
 A projekt tesztjei a `neuromorphic-brain` könyvtárból futtathatók:
 
 ```powershell

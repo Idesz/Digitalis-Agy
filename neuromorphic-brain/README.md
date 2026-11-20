@@ -13,3 +13,11 @@ Refer to:
 python train.py
 python dashboard_app.py
 ```
+
+### Held-out Benchmark
+```bash
+python benchmark.py --task xor --samples 256 --epochs 10 --seed 42
+python benchmark.py --measure-forgetting --samples 256 --epochs 5 --seed 42
+```
+
+The benchmark command reports train/validation metrics per epoch and a held-out test result; the forgetting mode trains XOR then parity and measures each task on its reserved validation/test split.

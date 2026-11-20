@@ -27,6 +27,7 @@ class NeuromorphicDataset(Dataset):
         firing_prob: float = 0.08,
         data_dir: Optional[str] = None,
         task: str = "classification",
+        seed: int = 42,
     ):
         super().__init__()
         self.num_samples = num_samples
@@ -36,6 +37,7 @@ class NeuromorphicDataset(Dataset):
         self.firing_prob = firing_prob
         self.data_dir = data_dir
         self.task = task.lower()
+        self.seed = seed
         if self.task not in {"classification", "parity", "xor"}:
             raise ValueError(f"Unsupported synthetic task: {task}")
         self.data_source = f"Synthetic {self.task.upper()}" if self.task in {"parity", "xor"} else "Synthetic DVS"
@@ -54,7 +56,7 @@ class NeuromorphicDataset(Dataset):
             return data["samples"][: self.num_samples], data["labels"][: self.num_samples]
 
         # Using a dedicated local Generator so global RNG state is not perturbed
-        gen = torch.Generator().manual_seed(42)
+        gen = torch.Generator().manual_seed(self.seed)
         if self.task in {"parity", "xor"}:
             bit_count = 2 if self.task == "xor" else 8
             if self.input_dim < bit_count * 2:
