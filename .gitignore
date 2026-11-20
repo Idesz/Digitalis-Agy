@@ -6,5 +6,6 @@ __pycache__/
 .coverage
 htmlcov/
 data/n_mnist/
+/neuromorphic-brain/data/n_mnist/
 results/
 .env

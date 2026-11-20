@@ -11,6 +11,8 @@ import os
 import torch
 from torch.utils.data import Dataset, DataLoader
 
+from src.core.nmnist import N_MNIST_FORMAT_VERSION
+
 
 class NeuromorphicDataset(Dataset):
     """
@@ -20,7 +22,7 @@ class NeuromorphicDataset(Dataset):
 
     def __init__(
         self,
-        num_samples: int = 100,
+        num_samples: Optional[int] = 100,
         time_steps: int = 16,
         input_dim: int = 64,
         num_classes: int = 10,
@@ -28,8 +30,13 @@ class NeuromorphicDataset(Dataset):
         data_dir: Optional[str] = None,
         task: str = "classification",
         seed: int = 42,
+        split: str = "train",
     ):
         super().__init__()
+        if num_samples is not None and (type(num_samples) is not int or num_samples < 1):
+            raise ValueError("num_samples must be a positive integer or None")
+        if split not in {"train", "test"}:
+            raise ValueError("split must be 'train' or 'test'")
         self.num_samples = num_samples
         self.time_steps = time_steps
         self.input_dim = input_dim
@@ -38,14 +45,16 @@ class NeuromorphicDataset(Dataset):
         self.data_dir = data_dir
         self.task = task.lower()
         self.seed = seed
+        self.split = split
         if self.task not in {"classification", "parity", "xor"}:
             raise ValueError(f"Unsupported synthetic task: {task}")
         self.data_source = f"Synthetic {self.task.upper()}" if self.task in {"parity", "xor"} else "Synthetic DVS"
 
         self.samples, self.labels = self._generate_or_load()
+        self.num_samples = len(self.samples)
 
     def _generate_or_load(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        # If an existing N-MNIST directory with preprocessed files is present, load it
+        # Load the official train or test split from the versioned preprocessed file.
         if (
             self.task == "classification"
             and self.data_dir
@@ -53,40 +62,43 @@ class NeuromorphicDataset(Dataset):
         ):
             path = os.path.join(self.data_dir, "processed_nmnist.pt")
             data = torch.load(path, map_location="cpu", weights_only=True)
-            if not isinstance(data, dict) or not {"samples", "labels"} <= data.keys():
-                raise ValueError("processed_nmnist.pt must contain samples and labels tensors")
-            samples = data["samples"]
-            labels = data["labels"]
+            if not isinstance(data, dict) or data.get("format_version") != N_MNIST_FORMAT_VERSION:
+                raise ValueError("Unsupported N-MNIST format; run prepare_n_mnist.py to create it")
+            sample_key = f"{self.split}_samples"
+            label_key = f"{self.split}_labels"
+            if sample_key not in data or label_key not in data:
+                raise ValueError(f"processed_nmnist.pt must contain the {self.split} split")
+            samples = data[sample_key]
+            labels = data[label_key]
             if not isinstance(samples, torch.Tensor) or not isinstance(labels, torch.Tensor):
                 raise ValueError("N-MNIST samples and labels must be tensors")
             if (
                 samples.ndim != 3
                 or samples.shape[0] < 1
-                or samples.shape[1] < 1
+                or samples.shape[1] != 16
                 or samples.shape[2] != self.input_dim
+                or samples.dtype != torch.uint8
             ):
                 raise ValueError(
-                    f"N-MNIST samples must have shape [N, T, {self.input_dim}] with N and T positive"
+                    f"N-MNIST samples must be uint8 tensors shaped [N, 16, {self.input_dim}]"
                 )
             if labels.ndim != 1 or labels.shape[0] != samples.shape[0]:
                 raise ValueError("N-MNIST labels must have shape [N] matching the samples")
-            if labels.is_floating_point() or labels.is_complex() or labels.dtype == torch.bool:
-                raise ValueError("N-MNIST labels must use an integer dtype")
-            if samples.is_complex():
-                raise ValueError("N-MNIST samples must use a real numeric dtype")
+            if labels.dtype != torch.long:
+                raise ValueError("N-MNIST labels must use int64 dtype")
+            if torch.any(samples > 1):
+                raise ValueError("N-MNIST samples must contain binary 0/1 values")
             samples = samples.to(dtype=torch.float32)
-            labels = labels.to(dtype=torch.long)
-            if (
-                not torch.isfinite(samples).all()
-                or torch.any((samples < 0.0) | (samples > 1.0))
-            ):
-                raise ValueError("N-MNIST samples must contain finite values in [0, 1]")
             if torch.any((labels < 0) | (labels >= self.num_classes)):
                 raise ValueError(f"N-MNIST labels must be in [0, {self.num_classes - 1}]")
             self.data_source = "N-MNIST"
+            if self.num_samples is None:
+                return samples, labels
             return samples[: self.num_samples], labels[: self.num_samples]
 
         # Using a dedicated local Generator so global RNG state is not perturbed
+        if self.num_samples is None:
+            raise ValueError("num_samples=None requires a processed N-MNIST dataset")
         gen = torch.Generator().manual_seed(self.seed)
         if self.task in {"parity", "xor"}:
             bit_count = 2 if self.task == "xor" else 8
@@ -142,12 +154,14 @@ class NeuromorphicDataset(Dataset):
 
 def get_neuromorphic_dataloader(
     batch_size: int = 16,
-    num_samples: int = 100,
+    num_samples: Optional[int] = 100,
     time_steps: int = 16,
     input_dim: int = 64,
     num_classes: int = 10,
     data_dir: Optional[str] = None,
     task: str = "classification",
+    split: str = "train",
+    seed: int = 42,
 ) -> DataLoader:
     dataset = NeuromorphicDataset(
         num_samples=num_samples,
@@ -156,5 +170,12 @@ def get_neuromorphic_dataloader(
         num_classes=num_classes,
         data_dir=data_dir,
         task=task,
+        split=split,
+        seed=seed,
     )
-    return DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=split == "train",
+        generator=torch.Generator().manual_seed(seed),
+    )

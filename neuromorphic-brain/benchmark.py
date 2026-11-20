@@ -17,6 +17,12 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--test-samples",
+        type=int,
+        default=0,
+        help="maximum official N-MNIST test samples; 0 uses the full test split",
+    )
     parser.add_argument("--measure-forgetting", action="store_true")
     parser.add_argument("--time-steps", type=int, default=8)
     parser.add_argument("--input-dim", type=int, default=64)
@@ -27,8 +33,12 @@ def main() -> None:
     parser.add_argument("--require-n-mnist", action="store_true")
     args = parser.parse_args()
 
+    if args.samples < 0 or args.test_samples < 0:
+        parser.error("sample counts must be non-negative")
     if args.require_n_mnist and (args.measure_forgetting or args.task != "classification"):
         parser.error("--require-n-mnist can only be used with --task classification")
+    if args.samples == 0 and not args.require_n_mnist:
+        parser.error("--samples 0 (all train samples) requires --require-n-mnist")
 
     if args.measure_forgetting:
         result = run_sequential_forgetting_benchmark(
@@ -42,7 +52,8 @@ def main() -> None:
     else:
         result = run_classification_benchmark(
             task=args.task,
-            num_samples=args.samples,
+            num_samples=args.samples or None,
+            test_samples=args.test_samples or None,
             time_steps=args.time_steps,
             input_dim=args.input_dim,
             epochs=args.epochs,

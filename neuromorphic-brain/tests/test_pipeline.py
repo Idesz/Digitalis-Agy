@@ -43,14 +43,23 @@ def test_binary_synthetic_tasks_match_encoded_bits(task, bit_count):
 
 
 def test_dataset_loads_local_preprocessed_nmnist_and_reports_source(tmp_path):
-    samples = torch.zeros(3, 4, 8)
+    samples = torch.zeros(3, 16, 64, dtype=torch.uint8)
     labels = torch.tensor([0, 1, 2])
-    torch.save({"samples": samples, "labels": labels}, tmp_path / "processed_nmnist.pt")
+    torch.save(
+        {
+            "format_version": 2,
+            "train_samples": samples,
+            "train_labels": labels,
+            "test_samples": samples[:2],
+            "test_labels": labels[:2],
+        },
+        tmp_path / "processed_nmnist.pt",
+    )
 
     dataset = NeuromorphicDataset(
         num_samples=2,
-        time_steps=4,
-        input_dim=8,
+        time_steps=16,
+        input_dim=64,
         num_classes=3,
         data_dir=str(tmp_path),
     )
@@ -63,15 +72,21 @@ def test_dataset_loads_local_preprocessed_nmnist_and_reports_source(tmp_path):
 
 def test_dataset_rejects_malformed_preprocessed_nmnist(tmp_path):
     torch.save(
-        {"samples": torch.zeros(2, 4, 8), "labels": torch.tensor([0])},
+        {
+            "format_version": 2,
+            "train_samples": torch.zeros(2, 16, 64, dtype=torch.uint8),
+            "train_labels": torch.tensor([0]),
+            "test_samples": torch.zeros(1, 16, 64, dtype=torch.uint8),
+            "test_labels": torch.tensor([0]),
+        },
         tmp_path / "processed_nmnist.pt",
     )
 
     with pytest.raises(ValueError, match=r"labels must have shape"):
         NeuromorphicDataset(
             num_samples=2,
-            time_steps=4,
-            input_dim=8,
+            time_steps=16,
+            input_dim=64,
             data_dir=str(tmp_path),
         )
 

@@ -61,12 +61,47 @@ A paramétereknek pozitív értékűeknek kell lenniük. Üres prompt, hibás pa
 |---|---|---|
 | XOR | `xor` | Szintetikus, kétbites XOR tüskeminta; 2 kimeneti osztály |
 | Bináris paritás | `parity` vagy `paritás` | Szintetikus, nyolcbites paritásfeladat; 2 kimeneti osztály |
-| Általános osztályozás | `classification` vagy más általános osztályozási prompt | 10 osztály; `data/n_mnist/processed_nmnist.pt` betöltése, ha létezik, különben szintetikus DVS |
+| Általános osztályozás | `classification` vagy más általános osztályozási prompt | 10 osztály; `data/n_mnist/processed_nmnist.pt` train splitje, ha létezik, különben szintetikus DVS |
 | Szekvencia-osztályozás | `sequence` vagy `szekvencia` | Kísérleti alias az általános osztályozási útvonalhoz; nem külön szekvencia-benchmark |
 
-A feldolgozott N-MNIST fájlnak a `neuromorphic-brain/data/n_mnist/processed_nmnist.pt` útvonalon kell lennie, és `samples`, `labels` mezőket kell tartalmaznia. A `samples` alakja `[N, T, input_dim]`, véges `[0, 1]` értékekkel; a `labels` alakja `[N]`, egész címkékkel, amelyek illeszkednek a kiválasztott osztályszámhoz. A fájl CPU-ra töltődik be súly-only módban. Ha a fájl nincs jelen, az általános osztályozás **Synthetic DVS** adatot használ; ez valós pipeline-futtatás szintetikus bemeneten, nem valódi N-MNIST mérés. Az XOR és a paritás mindig szintetikus feladat.
+Az N-MNIST importáló a [hivatalos adatkészlet](https://www.garrickorchard.com/datasets/n-mnist) külön tanító- és tesztarchívumát tölti le a Mendeley adattárból, ellenőrzi a közzétett MD5 ellenőrzőösszeggel (train: `20959b8e626244a1b502305a9e6e2031`, test: `69ca8762b2fe404d9b9bad1103e97832`), majd a nyers eseményfájlokat a `data/n_mnist/raw/` alatt tartja. Az összes eseményt 16 időbinbe osztja, a két polaritást logikai VAGY művelettel egyesíti, bináris tüskekeretté alakítja, majd minden időlépést adaptív maximum-poolinggal 8×8-as rácsra képez. Az eredmény `[N, 16, 64]` alakú `uint8` 0/1 tenzor; a címkék `[N]` alakú `int64` tenzorok 0–9 között.
 
-Valódi N-MNIST benchmark futtatásához használd a `--require-n-mnist` kapcsolót, így hiányzó fájlnál a parancs hibázik a szintetikus fallback helyett. A feldolgozott fájl helye `--data-dir` kapcsolóval adható meg; a ténylegesen betöltött dimenziók a JSON kimenet `input_shape` mezőjében jelennek meg.
+A feldolgozott, verziózott `processed_nmnist.pt` fájl négy külön tenzormezőt tartalmaz: `train_samples`, `train_labels`, `test_samples`, `test_labels`. A betöltő `split="train"` vagy `split="test"` paraméterrel kizárólag a kért splitet adja vissza; hiányzó vagy régi formátum esetén nem készít észrevétlen tesztadatot. Korábbi egysplit-es fájl esetén futtasd újra az előkészítést. A nyers archívumok és a feldolgozott fájl egyaránt ki van zárva a Gitből.
+
+Az adat előkészítése (a két teljes hivatalos archívum letöltésével):
+
+```powershell
+python prepare_n_mnist.py
+```
+
+Opcionálisan csak a megadott elemszámokat dolgozza fel, de az archívumok letöltése ilyenkor is teljes:
+
+```powershell
+python prepare_n_mnist.py --train-samples 160 --test-samples 160 --seed 42
+```
+
+A jelenlegi gyors tréning alapértelmezésben 160 tanító- és 160 tesztmintát használ. Valódi adaton a gyors mérés:
+
+```powershell
+python train.py --require-n-mnist
+```
+
+A teljes feldolgozott tanító- és tesztsplitet így lehet felhasználni:
+
+```powershell
+python train.py --require-n-mnist --all-train --all-test --epochs 3
+```
+
+A `train.py` külön, hivatalos teszt-spliten számol keresztentrópiás tesztveszteséget és pontosságot; a tanító batch pontossága külön, tanítóeredményként jelenik meg. N-MNIST hiányában az alapértelmezett futás szintetikus adatot használ, és ezt `Synthetic DVS` forrásként jelenti. A `--require-n-mnist` ezt a fallbacket hibává alakítja.
+
+Az osztályozási benchmark validációja kizárólag az N-MNIST tanítósplitből származik, a hivatalos tesztsplit pedig érintetlen marad:
+
+```powershell
+python benchmark.py --task classification --require-n-mnist --samples 5000 --test-samples 1000 --epochs 10
+python benchmark.py --task classification --require-n-mnist --samples 0 --test-samples 0 --epochs 10
+```
+
+A benchmark `--samples 0` és `--test-samples 0` értéke a teljes hivatalos train/test split használatát jelenti. A futás `data_source`, `split_sizes`, `split_sources` és `test` mezői rögzítik a forrást, a tényleges elemszámokat, valamint a külön teszt loss/accuracy értéket.
 
 A ténylegesen kiválasztott forrás az első batch feldolgozása után a **DATA** mezőben és az API `data_source` értékében látható.
 
@@ -76,6 +111,7 @@ A ténylegesen kiválasztott forrás az első batch feldolgozása után a **DATA
 |---|---|---|
 | Epoch | Az éppen feldolgozott epoch sorszáma | Nem az összes befejezett epoch kumulált száma |
 | Batch accuracy | A legutóbb feldolgozott batch helyesen osztályozott mintáinak aránya | Tanítóbatch-érték, nem külön teszt- vagy validációs pontosság |
+| Held-out test loss / accuracy | Az epochok utáni, külön tesztloader összes mintáján számolt keresztentrópia-átlag és pontosság | N-MNIST esetén csak a hivatalos tesztspliten; Synthetic DVS esetén külön seedelt szintetikus tesztmintákon |
 | Local loss / batch | A tanító batch DECOLLE-rétegein mért lokális veszteségek átlaga | Nem teszthalmaz- vagy epoch-átlag |
 | Surprise | A prediktív modul batchből származó meglepetési értéke | A modell prediktív kimenete, nem külső minősítés |
 | Curiosity, error rate, uncertainty | Simított belső értékek: a kíváncsiság a prediktív meglepetésből, a hibaarány az aktuális batch hibájából, a bizonytalanság a router komplexitási jeléből és a prediktív bizonytalansági pontszámból származik | A prediktív pontszám a meglepetés és a batch-átlagos tüskearány-változás gördülő percentilise; 30 batch-es bemelegedés előtt a nyers normalizált pontszám. Nem annak kalibrált valószínűsége, hogy az osztályozás hibás |
@@ -131,6 +167,8 @@ Reprodukálható XOR/paritás/klasszifikációs train–validation–test méré
 python benchmark.py --task xor --samples 256 --epochs 10 --seed 42
 python benchmark.py --measure-forgetting --samples 256 --epochs 5 --seed 42
 ```
+
+N-MNIST adat előkészítéséhez és külön teszthalmazon történő tanításhoz lásd a fenti `prepare_n_mnist.py` és `train.py` parancsokat. Az automatikus tesztek helyi fixture-öket használnak; nem töltenek le adatot.
 
 A parancs az epochonkénti tanító- és validációs loss/pontosság mellett a legjobb validációs epoch után visszatöltött modell külön teszteredményét írja ki. A felejtési mérés az XOR teszteredményt a paritásra történő további tanítás előtt és után is közli. Ezek a feladatok szintetikusak; külső MMLU/HumanEval/GSM8K adaptert a parancs nem állít.
 Az eredmény baseline-ja a tanítókészlet többségi osztályát jósló osztályozó tesztpontossága. A felejtési érték egy korábban megtanult feladat tesztpontosságának legjobb korábbi mért értéke és a további feladatra tanítás utáni pontosság különbsége, negatív érték nélkül.

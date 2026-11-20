@@ -53,10 +53,18 @@ def test_classification_benchmark_reports_held_out_metrics():
 
 def test_classification_benchmark_requires_and_reports_processed_n_mnist(tmp_path):
     generator = torch.Generator().manual_seed(19)
-    samples = (torch.rand(40, 2, 16, generator=generator) > 0.5).float()
-    labels = torch.arange(40).remainder(10)
+    train_samples = (torch.rand(40, 16, 64, generator=generator) > 0.5).to(torch.uint8)
+    test_samples = (torch.rand(12, 16, 64, generator=generator) > 0.5).to(torch.uint8)
+    train_labels = torch.arange(40).remainder(10)
+    test_labels = torch.full((12,), 9, dtype=torch.long)
     torch.save(
-        {"samples": samples, "labels": labels},
+        {
+            "format_version": 2,
+            "train_samples": train_samples,
+            "train_labels": train_labels,
+            "test_samples": test_samples,
+            "test_labels": test_labels,
+        },
         tmp_path / "processed_nmnist.pt",
     )
     original_num_threads = torch.get_num_threads()
@@ -65,8 +73,8 @@ def test_classification_benchmark_requires_and_reports_processed_n_mnist(tmp_pat
         result = run_classification_benchmark(
             task="classification",
             num_samples=40,
-            time_steps=2,
-            input_dim=16,
+            time_steps=16,
+            input_dim=64,
             batch_size=8,
             epochs=1,
             seed=19,
@@ -78,9 +86,14 @@ def test_classification_benchmark_requires_and_reports_processed_n_mnist(tmp_pat
         torch.set_num_threads(original_num_threads)
 
     assert result["data_source"] == "N-MNIST"
-    assert result["input_shape"] == {"time_steps": 2, "input_dim": 16}
-    assert result["split_sizes"] == {"train": 28, "validation": 6, "test": 6}
-    assert result["test"]["samples"] == 6.0
+    assert result["input_shape"] == {"time_steps": 16, "input_dim": 64}
+    assert result["split_sizes"] == {"train": 34, "validation": 6, "test": 12}
+    assert result["split_sources"] == {
+        "train": "N-MNIST train",
+        "validation": "N-MNIST train",
+        "test": "N-MNIST test",
+    }
+    assert result["test"]["samples"] == 12.0
 
 
 def test_n_mnist_requirement_fails_instead_of_using_synthetic_data(tmp_path):

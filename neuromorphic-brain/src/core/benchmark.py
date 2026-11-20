@@ -66,6 +66,25 @@ def evaluate_classifier(
     }
 
 
+def split_training_validation(
+    dataset: NeuromorphicDataset,
+    validation_ratio: float = 0.15,
+    seed: int = 42,
+) -> tuple[Subset, Subset]:
+    if not math.isfinite(validation_ratio) or not 0.0 < validation_ratio < 1.0:
+        raise ValueError("validation_ratio must be finite and in (0, 1)")
+    sample_count = len(dataset)
+    validation_count = max(1, int(sample_count * validation_ratio))
+    train_count = sample_count - validation_count
+    if train_count < 1:
+        raise ValueError("dataset must provide at least one train and validation sample")
+    return tuple(random_split(
+        dataset,
+        [train_count, validation_count],
+        generator=torch.Generator().manual_seed(seed),
+    ))
+
+
 def majority_class_baseline(
     dataset: NeuromorphicDataset,
     train_subset: Subset,
@@ -126,7 +145,7 @@ def train_classifier_epoch(
 
 def run_classification_benchmark(
     task: str = "xor",
-    num_samples: int = 256,
+    num_samples: Optional[int] = 256,
     time_steps: int = 8,
     input_dim: int = 64,
     batch_size: int = 16,
@@ -135,13 +154,16 @@ def run_classification_benchmark(
     data_dir: Optional[str] = None,
     require_n_mnist: bool = False,
     device: Optional[torch.device] = None,
+    test_samples: Optional[int] = None,
 ) -> dict[str, Any]:
     if type(epochs) is not int or epochs < 1:
         raise ValueError("epochs must be a positive integer")
     if type(batch_size) is not int or batch_size < 1:
         raise ValueError("batch_size must be a positive integer")
-    if type(num_samples) is not int or num_samples < 10:
-        raise ValueError("num_samples must be an integer of at least 10")
+    if num_samples is not None and (type(num_samples) is not int or num_samples < 10):
+        raise ValueError("num_samples must be None or an integer of at least 10")
+    if test_samples is not None and (type(test_samples) is not int or test_samples < 1):
+        raise ValueError("test_samples must be None or a positive integer")
     if not isinstance(require_n_mnist, bool):
         raise ValueError("require_n_mnist must be a boolean")
 
@@ -157,12 +179,42 @@ def run_classification_benchmark(
         data_dir=data_dir,
         task=normalized_task,
         seed=seed,
+        split="train",
     )
     if require_n_mnist and dataset.data_source != "N-MNIST":
         raise FileNotFoundError(
             "N-MNIST was required but processed_nmnist.pt was not loaded from data_dir"
         )
-    train_subset, validation_subset, test_subset = split_dataset(dataset, seed=seed)
+    if dataset.data_source == "N-MNIST":
+        train_subset, validation_subset = split_training_validation(dataset, seed=seed)
+        test_dataset = NeuromorphicDataset(
+            num_samples=test_samples,
+            time_steps=time_steps,
+            input_dim=input_dim,
+            num_classes=class_count,
+            data_dir=data_dir,
+            task=normalized_task,
+            seed=seed + 1,
+            split="test",
+        )
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+        split_sources = {
+            "train": "N-MNIST train",
+            "validation": "N-MNIST train",
+            "test": "N-MNIST test",
+        }
+        test_count = len(test_dataset)
+    else:
+        if num_samples is None:
+            raise ValueError("num_samples=None requires processed N-MNIST data")
+        train_subset, validation_subset, test_subset = split_dataset(dataset, seed=seed)
+        test_loader = DataLoader(test_subset, batch_size=batch_size, shuffle=False)
+        split_sources = {
+            "train": dataset.data_source,
+            "validation": dataset.data_source,
+            "test": dataset.data_source,
+        }
+        test_count = len(test_subset)
     train_loader = DataLoader(
         train_subset,
         batch_size=batch_size,
@@ -170,7 +222,6 @@ def run_classification_benchmark(
         generator=torch.Generator().manual_seed(seed + 1),
     )
     validation_loader = DataLoader(validation_subset, batch_size=batch_size, shuffle=False)
-    test_loader = DataLoader(test_subset, batch_size=batch_size, shuffle=False)
 
     torch.manual_seed(seed)
     if torch.cuda.is_available():
@@ -226,8 +277,9 @@ def run_classification_benchmark(
         "split_sizes": {
             "train": len(train_subset),
             "validation": len(validation_subset),
-            "test": len(test_subset),
+            "test": test_count,
         },
+        "split_sources": split_sources,
         "epochs": epoch_metrics,
         "best_epoch": best_epoch,
         "test": test_metrics,

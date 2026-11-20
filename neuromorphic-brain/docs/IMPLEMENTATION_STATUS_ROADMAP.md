@@ -82,7 +82,7 @@ Kapcsolódó implementáció:
 ### 3.4 Tanítási és telemetriai felület
 
 - Szintetikus DVS, XOR és bináris paritás adatkészlet.
-- Feldolgozott N-MNIST betöltés helyi fájlból.
+- Hivatalos N-MNIST train/test archívumok letöltése és ellenőrzése, reprodukálható `[N,16,64]` előfeldolgozás, külön split-betöltés és valódi tesztmetrika implementálva.
 - Batchenkénti telemetria.
 - Tanítás indítása, leállítása és állapotstreamelése.
 - Helyi webes dashboard és terminálos nézet.
@@ -168,7 +168,8 @@ A projekt akkor tekinthető az eredeti elképzeléshez közelebbinek, ha a köve
 
 - [x] XOR és paritás mellett külön validációs és tesztelosztás.
 - [x] Held-out pontosság és loss jelentése.
-- [ ] Valódi N-MNIST vagy más dokumentált adatforrás futtatása. A szigorú lokális `.pt` betöltés és a `--require-n-mnist` mód elérhető; valódi adatfájl nincs jelen, ezért tényleges N-MNIST mérés még nincs.
+- [x] Hivatalos N-MNIST importáló, train/test szeparáció, gyors és teljes adatmód, külön teszt loss/pontosság és offline tesztek.
+- [ ] Teljes hivatalos adat letöltése és tényleges N-MNIST mérés. A lokális archívum nincs jelen, ezért itt még nem készült valós adaton számolt eredmény.
 - [ ] Külső benchmarkadapterek; a helyi XOR/paritás/klasszifikációs futásoknál reprodukálható többségi osztály baseline elérhető.
 - [x] Online tanulás során új feladatra emlékezés és régi tudás visszaesésének mérése.
 - [x] Tanulási loss/pontosság, validációs checkpoint kiválasztása és külön teszteredmény reprodukálható parancssori futtatása.

@@ -77,19 +77,31 @@ class DECOLLELayer(nn.Module):
 ```python
 def get_neuromorphic_dataloader(
     batch_size: int = 16,
-    num_samples: int = 100,
+    num_samples: int | None = 100,
     num_classes: int = 10,
     data_dir: str | None = None,
     task: str = "classification",
+    split: str = "train",
+    seed: int = 42,
 ) -> DataLoader: ...
 ```
 
 `task="classification"` loads `processed_nmnist.pt` from `data_dir` when present, otherwise it uses
-the class-conditioned synthetic event stream. The file must contain CPU-loadable `samples` and
-`labels` tensors shaped `[N, T, input_dim]` and `[N]`; samples must be finite and in `[0, 1]`, and
-labels must be integer class indices. It is loaded with `weights_only=True`. `task="xor"` and
-`task="parity"` always generate binary spike-pattern tasks with matching two-class labels. The
-dataset reports its active source (`N-MNIST`, `Synthetic DVS`, `Synthetic XOR`, or `Synthetic PARITY`).
+the class-conditioned synthetic event stream. The version-2 file contains separate
+`train_samples`/`train_labels` and `test_samples`/`test_labels` tensors. Both sample tensors are
+binary `uint8` `[N, 16, 64]`; labels are `int64` `[N]` with values 0–9. It is loaded with
+`weights_only=True`. `split` selects only the official train or test data; `num_samples=None`
+selects the full split, otherwise it caps the selected count. The loader shuffles only the train
+split. `task="xor"` and `task="parity"` always generate binary spike-pattern tasks with matching
+two-class labels. The dataset reports its active source (`N-MNIST`, `Synthetic DVS`,
+`Synthetic XOR`, or `Synthetic PARITY`).
+
+Run `python prepare_n_mnist.py` from the project directory to download the official train/test
+archives, verify their MD5 checksums, and save `data/n_mnist/processed_nmnist.pt`. The importer
+decodes the official five-byte event records (including timestamp overflow markers), creates 16
+equal-duration temporal bins, merges polarities with logical OR, and applies adaptive max pooling
+to an 8x8 grid. `--train-samples` and `--test-samples` optionally limit processed samples; zero
+means the complete split. Raw archives and processed data are git-ignored.
 
 ### Memory Hierarchy (`src/memory/`)
 
@@ -217,4 +229,4 @@ On eligible slow routes, the planner receives a normalized prior for each first 
 
 See [DASHBOARD_TRAINING_GUIDE.md](DASHBOARD_TRAINING_GUIDE.md) for the UI, data provenance, metric semantics, workflow limitations, launch commands, and verification instructions in one place.
 
-The separate `benchmark.py` command creates seeded, disjoint train/validation/test splits for the local classification tasks, chooses a checkpoint by validation accuracy (validation loss breaks ties), and reports test metrics plus a majority-class baseline. `--measure-forgetting` trains XOR then parity sequentially and reports old-task test-accuracy decline; it does not claim support for external language-model benchmarks.
+The separate `benchmark.py` command creates seeded, disjoint train/validation/test splits for synthetic local classification tasks, chooses a checkpoint by validation accuracy (validation loss breaks ties), and reports test metrics plus a majority-class baseline. For N-MNIST, validation is taken only from the official training split and the untouched official test split is used for final metrics. `--samples 0` and `--test-samples 0` select all N-MNIST samples. `train.py` defaults to 160 training and 160 test samples and supports `--all-train`/`--all-test`. `--measure-forgetting` trains XOR then parity sequentially and reports old-task test-accuracy decline; it does not claim support for external language-model benchmarks.
