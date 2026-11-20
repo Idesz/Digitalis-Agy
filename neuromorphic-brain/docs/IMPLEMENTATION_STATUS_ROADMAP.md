@@ -20,7 +20,7 @@ Ez a dokumentum a dokumentált célállapotot, a jelenlegi implementációt és 
 |---|---|---|
 | DECOLLE és LIF hálózat | Használható prototípus | Jelentős részben megvalósult |
 | AdaMax helyi optimizálás | Megvalósítva rétegenként | Megvalósult |
-| Szinaptikus gráf és Hebb-pruning | Önálló modul és tesztek | A fő pipeline-ba nincs beintegrálva |
+| Szinaptikus gráf és Hebb-pruning | A DECOLLE rétegek tényleges együttaktivitása gráféleket hoz létre | Az aktivitásintegráció megvan; az automatikus pruning, checkpoint és hosszú futású stabilitás hiányzik |
 | Munkamemória | Redis + szálbiztos in-memory fallback | Megvalósult |
 | Epizodikus memória | Qdrant + in-memory fallback | Alapfunkciók megvalósultak |
 | Szemantikus memória | NetworkX irányított gráf | Folyamatbeli prototípus; tartós tárolás hiányzik |
@@ -96,10 +96,10 @@ Kapcsolódó dokumentáció:
 
 ### 4.1 Kritikus hiányosságok
 
-1. **A szinaptikus gráf nincs a kognitív pipeline része.**
-   - A Hebb-alapú Node/Edge implementáció létezik.
-   - A neurális súlyok főként tenzorokban élnek.
-   - Az aktív neuronok gráfba mentése, élaktivitás és folyamatos pruning nem automatikus.
+1. **A szinaptikus gráf integrációja részleges.**
+   - A pipeline mostantól az egymás melletti DECOLLE-rétegek azonos időlépésben együtt tüzelő neuronjait irányított gráfélekként rögzíti.
+   - A gráf kapcsolatszáma megjelenik a pipeline eredményeiben.
+   - Az automatikus pruning, a checkpointból helyreállítás és az 50 epochos stabilitásvizsgálat még hiányzik.
 
 2. **Az alvási konszolidáció nem elosztott és nem teljes.**
    - Hiányzik az epizodikus hasonlósági klaszterezés.
@@ -138,8 +138,8 @@ A projekt akkor tekinthető az eredeti elképzeléshez közelebbinek, ha a köve
 
 ### Fázis 1 – Stabil integrált szinaptikus rendszer
 
-- [ ] A SynapticGraphManager csomópontjai és élei a DECOLLE neurális rétegek aktivitásához kapcsolódnak.
-- [ ] Új edge csak tényleges, időablakban együtt aktivált neuronpárból jöhet létre.
+- [x] A SynapticGraphManager csomópontjai és élei a DECOLLE neurális rétegek aktivitásához kapcsolódnak.
+- [x] Új edge csak ténylegesen, azonos batch-elemben és időlépésben együtt aktivált neuronpárból jöhet létre.
 - [ ] A pruning idősorozatos háttérműveletként működik.
 - [ ] Gráfstruktúra checkpointból helyreállítható.
 - [ ] Legalább 50 epohos ismételt futásnál nincs súlynövekedési vagy memóriahiba.

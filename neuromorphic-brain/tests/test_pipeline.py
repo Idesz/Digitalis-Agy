@@ -116,6 +116,37 @@ def test_full_cognitive_pipeline_cycle():
     assert c_stats["processed_events"] >= 1
 
 
+def test_pipeline_records_only_observed_synaptic_coactivations(monkeypatch):
+    pipeline = NeuromorphicCognitivePipeline(
+        input_dim=2,
+        hidden_dims=[2, 2],
+        num_classes=2,
+        device=torch.device("cpu"),
+    )
+    layer_spikes = [
+        torch.tensor([[[1.0, 0.0], [1.0, 0.0], [0.0, 1.0]]]),
+        torch.tensor([[[1.0, 0.0], [1.0, 0.0], [1.0, 0.0]]]),
+    ]
+    readouts = [torch.zeros(1, 2), torch.tensor([[1.0, 0.0]])]
+    monkeypatch.setattr(pipeline.snn, "forward_sequence", lambda inputs: (layer_spikes, readouts))
+
+    stats = pipeline.process_batch(
+        inputs=torch.zeros(1, 3, 2),
+        targets=torch.zeros(1, dtype=torch.long),
+        train_step=False,
+    )
+
+    assert set(pipeline.synaptic_graph.edges) == {
+        "layer_0:neuron_0->layer_1:neuron_0",
+        "layer_0:neuron_1->layer_1:neuron_0",
+    }
+    assert pipeline.synaptic_graph.edges["layer_0:neuron_0->layer_1:neuron_0"].weight > (
+        pipeline.synaptic_graph.initial_weight
+    )
+    assert stats["synaptic_graph_nodes"] == 3
+    assert stats["synaptic_graph_edges"] == 2
+
+
 def test_cautious_homeostasis_forces_system_two(monkeypatch):
     pipeline = NeuromorphicCognitivePipeline(
         input_dim=4,

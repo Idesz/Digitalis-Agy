@@ -17,6 +17,7 @@ import torch.nn.functional as F
 import numpy as np
 
 from src.core.decolle_layer import DECOLLENetwork
+from src.core.synaptic_graph import SynapticGraphManager
 from src.memory.working_memory import WorkingMemory
 from src.memory.episodic_memory import EpisodicMemory, EpisodicEvent
 from src.memory.semantic_memory import SemanticMemory
@@ -63,6 +64,7 @@ class NeuromorphicCognitivePipeline:
         all_layer_dims = [input_dim] + hidden_dims
         self.snn = DECOLLENetwork(layer_sizes=all_layer_dims, num_classes=num_classes).to(self.device)
         self.optimizers = self.snn.get_adamax_optimizers(lr=lr)
+        self.synaptic_graph = SynapticGraphManager()
 
         # Pillar 2: Memory hierarchy
         self.working_mem = WorkingMemory()
@@ -120,6 +122,7 @@ class NeuromorphicCognitivePipeline:
 
         # 2. DECOLLE SNN Local Learning
         layer_spikes, layer_readouts = self.snn.forward_sequence(inputs)
+        self._record_synaptic_coactivations(layer_spikes)
 
         layer_losses = []
         if train_step:
@@ -249,6 +252,8 @@ class NeuromorphicCognitivePipeline:
             "layer_activity": layer_activity,
             "spike_count": spike_count,
             "connection_count": connection_count,
+            "synaptic_graph_nodes": len(self.synaptic_graph.nodes),
+            "synaptic_graph_edges": len(self.synaptic_graph.edges),
             "process_cpu_load": process_cpu_load,
             "layer_losses": layer_losses,
             "route": decision.value,
@@ -264,3 +269,17 @@ class NeuromorphicCognitivePipeline:
     def sleep_and_consolidate(self) -> Dict[str, int]:
         """Runs offline sleep consolidation cycle."""
         return self.sleep_worker.consolidate()
+
+    def _record_synaptic_coactivations(self, layer_spikes: list[torch.Tensor]) -> None:
+        for layer_index, (source_spikes, target_spikes) in enumerate(
+            zip(layer_spikes, layer_spikes[1:])
+        ):
+            coactivations = (
+                (source_spikes > 0).unsqueeze(-1)
+                & (target_spikes > 0).unsqueeze(-2)
+            ).nonzero(as_tuple=False)
+            for _, _, source_neuron, target_neuron in coactivations.detach().cpu().tolist():
+                self.synaptic_graph.record_coactivation(
+                    source_id=f"layer_{layer_index}:neuron_{source_neuron}",
+                    target_id=f"layer_{layer_index + 1}:neuron_{target_neuron}",
+                )

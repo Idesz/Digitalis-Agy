@@ -48,6 +48,33 @@ class SynapticGraphManager:
             if len(self.nodes[node_id].activation_history) > 100:
                 self.nodes[node_id].activation_history = self.nodes[node_id].activation_history[-100:]
 
+    def record_coactivation(
+        self,
+        source_id: str,
+        target_id: str,
+        timestamp: Optional[float] = None,
+    ) -> None:
+        if timestamp is None:
+            timestamp = time.time()
+
+        self.add_node(source_id)
+        self.add_node(target_id)
+        self.trigger_activation(source_id, timestamp)
+        self.trigger_activation(target_id, timestamp)
+
+        edge_key = f"{source_id}->{target_id}"
+        if edge_key not in self.edges:
+            self.edges[edge_key] = Edge(
+                source_id=source_id,
+                target_id=target_id,
+                weight=self.initial_weight,
+                last_activated=timestamp,
+            )
+        else:
+            edge = self.edges[edge_key]
+            edge.weight += self.learning_rate * (1.0 - edge.weight)
+            edge.last_activated = timestamp
+
     def update_local_learning(self, node_a: str, node_b: str, time_window: float = 0.5) -> None:
         if node_a not in self.nodes or node_b not in self.nodes:
             return
