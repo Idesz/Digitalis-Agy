@@ -133,6 +133,7 @@ def run_classification_benchmark(
     epochs: int = 10,
     seed: int = 42,
     data_dir: Optional[str] = None,
+    require_n_mnist: bool = False,
     device: Optional[torch.device] = None,
 ) -> dict[str, Any]:
     if type(epochs) is not int or epochs < 1:
@@ -141,6 +142,8 @@ def run_classification_benchmark(
         raise ValueError("batch_size must be a positive integer")
     if type(num_samples) is not int or num_samples < 10:
         raise ValueError("num_samples must be an integer of at least 10")
+    if not isinstance(require_n_mnist, bool):
+        raise ValueError("require_n_mnist must be a boolean")
 
     normalized_task = task.lower()
     if normalized_task not in {"xor", "parity", "classification"}:
@@ -155,6 +158,10 @@ def run_classification_benchmark(
         task=normalized_task,
         seed=seed,
     )
+    if require_n_mnist and dataset.data_source != "N-MNIST":
+        raise FileNotFoundError(
+            "N-MNIST was required but processed_nmnist.pt was not loaded from data_dir"
+        )
     train_subset, validation_subset, test_subset = split_dataset(dataset, seed=seed)
     train_loader = DataLoader(
         train_subset,
@@ -212,6 +219,10 @@ def run_classification_benchmark(
         "task": normalized_task,
         "seed": seed,
         "data_source": dataset.data_source,
+        "input_shape": {
+            "time_steps": int(dataset.samples.shape[1]),
+            "input_dim": int(dataset.samples.shape[2]),
+        },
         "split_sizes": {
             "train": len(train_subset),
             "validation": len(validation_subset),

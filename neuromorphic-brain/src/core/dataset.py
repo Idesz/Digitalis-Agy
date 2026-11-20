@@ -3,7 +3,7 @@ Neuromorphic Dataset and Synthetic DVS Spike Generator.
 Supports:
 1. Synthetic event generator (Poisson / DVS-like spatio-temporal spike streams)
    ensuring complete out-of-the-box CPU/GPU testing without external download dependencies.
-2. Standard N-MNIST binning loader from raw events if dataset files are supplied in data/n_mnist.
+2. Loader for locally preprocessed N-MNIST spike tensors.
 """
 
 from typing import Tuple, Optional
@@ -51,9 +51,40 @@ class NeuromorphicDataset(Dataset):
             and self.data_dir
             and os.path.exists(os.path.join(self.data_dir, "processed_nmnist.pt"))
         ):
-            data = torch.load(os.path.join(self.data_dir, "processed_nmnist.pt"))
+            path = os.path.join(self.data_dir, "processed_nmnist.pt")
+            data = torch.load(path, map_location="cpu", weights_only=True)
+            if not isinstance(data, dict) or not {"samples", "labels"} <= data.keys():
+                raise ValueError("processed_nmnist.pt must contain samples and labels tensors")
+            samples = data["samples"]
+            labels = data["labels"]
+            if not isinstance(samples, torch.Tensor) or not isinstance(labels, torch.Tensor):
+                raise ValueError("N-MNIST samples and labels must be tensors")
+            if (
+                samples.ndim != 3
+                or samples.shape[0] < 1
+                or samples.shape[1] < 1
+                or samples.shape[2] != self.input_dim
+            ):
+                raise ValueError(
+                    f"N-MNIST samples must have shape [N, T, {self.input_dim}] with N and T positive"
+                )
+            if labels.ndim != 1 or labels.shape[0] != samples.shape[0]:
+                raise ValueError("N-MNIST labels must have shape [N] matching the samples")
+            if labels.is_floating_point() or labels.is_complex() or labels.dtype == torch.bool:
+                raise ValueError("N-MNIST labels must use an integer dtype")
+            if samples.is_complex():
+                raise ValueError("N-MNIST samples must use a real numeric dtype")
+            samples = samples.to(dtype=torch.float32)
+            labels = labels.to(dtype=torch.long)
+            if (
+                not torch.isfinite(samples).all()
+                or torch.any((samples < 0.0) | (samples > 1.0))
+            ):
+                raise ValueError("N-MNIST samples must contain finite values in [0, 1]")
+            if torch.any((labels < 0) | (labels >= self.num_classes)):
+                raise ValueError(f"N-MNIST labels must be in [0, {self.num_classes - 1}]")
             self.data_source = "N-MNIST"
-            return data["samples"][: self.num_samples], data["labels"][: self.num_samples]
+            return samples[: self.num_samples], labels[: self.num_samples]
 
         # Using a dedicated local Generator so global RNG state is not perturbed
         gen = torch.Generator().manual_seed(self.seed)

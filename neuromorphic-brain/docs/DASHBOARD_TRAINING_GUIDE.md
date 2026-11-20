@@ -64,7 +64,9 @@ A paramétereknek pozitív értékűeknek kell lenniük. Üres prompt, hibás pa
 | Általános osztályozás | `classification` vagy más általános osztályozási prompt | 10 osztály; `data/n_mnist/processed_nmnist.pt` betöltése, ha létezik, különben szintetikus DVS |
 | Szekvencia-osztályozás | `sequence` vagy `szekvencia` | Kísérleti alias az általános osztályozási útvonalhoz; nem külön szekvencia-benchmark |
 
-A feldolgozott N-MNIST fájlnak a `neuromorphic-brain/data/n_mnist/processed_nmnist.pt` útvonalon kell lennie, és `samples`, `labels` mezőket kell tartalmaznia. Ha a fájl nincs jelen, az általános osztályozás **Synthetic DVS** adatot használ; ez valós pipeline-futtatás szintetikus bemeneten, nem valódi N-MNIST mérés. Az XOR és a paritás mindig szintetikus feladat.
+A feldolgozott N-MNIST fájlnak a `neuromorphic-brain/data/n_mnist/processed_nmnist.pt` útvonalon kell lennie, és `samples`, `labels` mezőket kell tartalmaznia. A `samples` alakja `[N, T, input_dim]`, véges `[0, 1]` értékekkel; a `labels` alakja `[N]`, egész címkékkel, amelyek illeszkednek a kiválasztott osztályszámhoz. A fájl CPU-ra töltődik be súly-only módban. Ha a fájl nincs jelen, az általános osztályozás **Synthetic DVS** adatot használ; ez valós pipeline-futtatás szintetikus bemeneten, nem valódi N-MNIST mérés. Az XOR és a paritás mindig szintetikus feladat.
+
+Valódi N-MNIST benchmark futtatásához használd a `--require-n-mnist` kapcsolót, így hiányzó fájlnál a parancs hibázik a szintetikus fallback helyett. A feldolgozott fájl helye `--data-dir` kapcsolóval adható meg; a ténylegesen betöltött dimenziók a JSON kimenet `input_shape` mezőjében jelennek meg.
 
 A ténylegesen kiválasztott forrás az első batch feldolgozása után a **DATA** mezőben és az API `data_source` értékében látható.
 

@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from src.core.benchmark import (
@@ -48,6 +49,52 @@ def test_classification_benchmark_reports_held_out_metrics():
     assert result["test"]["samples"] == 6.0
     assert result["baseline"]["strategy"] == "majority_class"
     assert 0.0 <= result["baseline"]["test_accuracy"] <= 1.0
+
+
+def test_classification_benchmark_requires_and_reports_processed_n_mnist(tmp_path):
+    generator = torch.Generator().manual_seed(19)
+    samples = (torch.rand(40, 2, 16, generator=generator) > 0.5).float()
+    labels = torch.arange(40).remainder(10)
+    torch.save(
+        {"samples": samples, "labels": labels},
+        tmp_path / "processed_nmnist.pt",
+    )
+    original_num_threads = torch.get_num_threads()
+    torch.set_num_threads(1)
+    try:
+        result = run_classification_benchmark(
+            task="classification",
+            num_samples=40,
+            time_steps=2,
+            input_dim=16,
+            batch_size=8,
+            epochs=1,
+            seed=19,
+            data_dir=str(tmp_path),
+            require_n_mnist=True,
+            device=torch.device("cpu"),
+        )
+    finally:
+        torch.set_num_threads(original_num_threads)
+
+    assert result["data_source"] == "N-MNIST"
+    assert result["input_shape"] == {"time_steps": 2, "input_dim": 16}
+    assert result["split_sizes"] == {"train": 28, "validation": 6, "test": 6}
+    assert result["test"]["samples"] == 6.0
+
+
+def test_n_mnist_requirement_fails_instead_of_using_synthetic_data(tmp_path):
+    with pytest.raises(FileNotFoundError, match="N-MNIST was required"):
+        run_classification_benchmark(
+            task="classification",
+            num_samples=40,
+            time_steps=2,
+            input_dim=16,
+            epochs=1,
+            data_dir=str(tmp_path),
+            require_n_mnist=True,
+            device=torch.device("cpu"),
+        )
 
 
 def test_sequential_benchmark_reports_forgetting_after_task_switch():

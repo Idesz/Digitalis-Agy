@@ -61,6 +61,21 @@ def test_dataset_loads_local_preprocessed_nmnist_and_reports_source(tmp_path):
     assert torch.equal(dataset.labels, labels[:2])
 
 
+def test_dataset_rejects_malformed_preprocessed_nmnist(tmp_path):
+    torch.save(
+        {"samples": torch.zeros(2, 4, 8), "labels": torch.tensor([0])},
+        tmp_path / "processed_nmnist.pt",
+    )
+
+    with pytest.raises(ValueError, match=r"labels must have shape"):
+        NeuromorphicDataset(
+            num_samples=2,
+            time_steps=4,
+            input_dim=8,
+            data_dir=str(tmp_path),
+        )
+
+
 def test_full_cognitive_pipeline_cycle():
     device = torch.device("cpu")
     input_dim = 16

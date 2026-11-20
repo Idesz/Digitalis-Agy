@@ -18,6 +18,7 @@ python dashboard_app.py
 ```bash
 python benchmark.py --task xor --samples 256 --epochs 10 --seed 42
 python benchmark.py --measure-forgetting --samples 256 --epochs 5 --seed 42
+python benchmark.py --task classification --require-n-mnist --samples 1000 --epochs 10 --input-dim 64
 ```
 
 The benchmark command reports train/validation metrics per epoch and a held-out test result; the forgetting mode trains XOR then parity and measures each task on its reserved validation/test split.

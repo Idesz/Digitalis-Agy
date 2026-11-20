@@ -168,7 +168,7 @@ A projekt akkor tekinthető az eredeti elképzeléshez közelebbinek, ha a köve
 
 - [x] XOR és paritás mellett külön validációs és tesztelosztás.
 - [x] Held-out pontosság és loss jelentése.
-- [ ] Valódi N-MNIST vagy más dokumentált adatforrás futtatása.
+- [ ] Valódi N-MNIST vagy más dokumentált adatforrás futtatása. A szigorú lokális `.pt` betöltés és a `--require-n-mnist` mód elérhető; valódi adatfájl nincs jelen, ezért tényleges N-MNIST mérés még nincs.
 - [ ] Külső benchmarkadapterek; a helyi XOR/paritás/klasszifikációs futásoknál reprodukálható többségi osztály baseline elérhető.
 - [x] Online tanulás során új feladatra emlékezés és régi tudás visszaesésének mérése.
 - [x] Tanulási loss/pontosság, validációs checkpoint kiválasztása és külön teszteredmény reprodukálható parancssori futtatása.

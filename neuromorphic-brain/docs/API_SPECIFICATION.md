@@ -85,9 +85,11 @@ def get_neuromorphic_dataloader(
 ```
 
 `task="classification"` loads `processed_nmnist.pt` from `data_dir` when present, otherwise it uses
-the class-conditioned synthetic event stream. `task="xor"` and `task="parity"` always generate
-binary spike-pattern tasks with matching two-class labels. The dataset reports its active source
-(`N-MNIST`, `Synthetic DVS`, `Synthetic XOR`, or `Synthetic PARITY`).
+the class-conditioned synthetic event stream. The file must contain CPU-loadable `samples` and
+`labels` tensors shaped `[N, T, input_dim]` and `[N]`; samples must be finite and in `[0, 1]`, and
+labels must be integer class indices. It is loaded with `weights_only=True`. `task="xor"` and
+`task="parity"` always generate binary spike-pattern tasks with matching two-class labels. The
+dataset reports its active source (`N-MNIST`, `Synthetic DVS`, `Synthetic XOR`, or `Synthetic PARITY`).
 
 ### Memory Hierarchy (`src/memory/`)
 
