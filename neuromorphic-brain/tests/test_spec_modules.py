@@ -57,6 +57,7 @@ def test_synaptic_graph_checkpoint_round_trip(tmp_path):
     assert restored.nodes["layer_0:neuron_1"].activation_history == [123.0]
     assert restored.edges["layer_0:neuron_1->layer_1:neuron_2"].weight == 0.3
     assert restored.edges["layer_0:neuron_1->layer_1:neuron_2"].last_activated == 123.0
+    assert restored.edges["layer_0:neuron_1->layer_1:neuron_2"].last_decayed is None
 
 
 def test_memory_hierarchy_and_sleep_consolidation():

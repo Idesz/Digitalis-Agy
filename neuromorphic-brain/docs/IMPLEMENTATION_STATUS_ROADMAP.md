@@ -20,7 +20,7 @@ Ez a dokumentum a dokumentált célállapotot, a jelenlegi implementációt és 
 |---|---|---|
 | DECOLLE és LIF hálózat | Használható prototípus | Jelentős részben megvalósult |
 | AdaMax helyi optimizálás | Megvalósítva rétegenként | Megvalósult |
-| Szinaptikus gráf és Hebb-pruning | A DECOLLE rétegek együttaktivitása gráféleket hoz létre; JSON checkpointból helyreállítható | Az aktivitásintegráció és checkpoint megvan; az automatikus pruning és hosszú futású stabilitás hiányzik |
+| Szinaptikus gráf és Hebb-pruning | DECOLLE együttaktivitás, JSON checkpoint, 100 lépésenkénti pruning | A fő funkciók megvannak; a hosszabb benchmark és nagy hálózatos skálázás további validációt igényel |
 | Munkamemória | Redis + szálbiztos in-memory fallback | Megvalósult |
 | Epizodikus memória | Qdrant + in-memory fallback | Alapfunkciók megvalósultak |
 | Szemantikus memória | NetworkX irányított gráf | Folyamatbeli prototípus; tartós tárolás hiányzik |
@@ -100,7 +100,8 @@ Kapcsolódó dokumentáció:
    - A pipeline mostantól az egymás melletti DECOLLE-rétegek azonos időlépésben együtt tüzelő neuronjait irányított gráfélekként rögzíti.
    - A gráf kapcsolatszáma megjelenik a pipeline eredményeiben.
    - A verziózott JSON checkpoint mentése és betöltése megvalósult.
-   - Az automatikus pruning és az 50 epochos stabilitásvizsgálat még hiányzik.
+   - Inaktív élek ritka, 100 pipeline-lépésenkénti pruningja megvalósult; az időbélyeg megőrzi a tényleges utolsó aktivációt.
+   - Az 50 epochos kis CPU stabilitásteszt lefedi a súlyok, élek és aktivitáselőzmények alapvető korlátait; nagy hálózatos benchmark még szükséges.
 
 2. **Az alvási konszolidáció nem elosztott és nem teljes.**
    - Hiányzik az epizodikus hasonlósági klaszterezés.
@@ -141,9 +142,9 @@ A projekt akkor tekinthető az eredeti elképzeléshez közelebbinek, ha a köve
 
 - [x] A SynapticGraphManager csomópontjai és élei a DECOLLE neurális rétegek aktivitásához kapcsolódnak.
 - [x] Új edge csak ténylegesen, azonos batch-elemben és időlépésben együtt aktivált neuronpárból jöhet létre.
-- [ ] A pruning idősorozatos háttérműveletként működik.
+- [x] A pruning idősorozatos karbantartási műveletként, 100 pipeline-lépésenként lefut.
 - [x] Gráfstruktúra checkpointból helyreállítható.
-- [ ] Legalább 50 epohos ismételt futásnál nincs súlynövekedési vagy memóriahiba.
+- [x] Legalább 50 epochos ismételt kis CPU-futásban a súlyok és gráfértékek végesek, az aktivitáselőzmények korlátosak.
 
 ### Fázis 2 – Valódi memória konszolidáció
 

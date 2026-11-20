@@ -28,6 +28,9 @@ from src.routing.cdr_router import CDRRouter, SystemRoute
 from src.world_model.jepa_simulator import JEPASimulator
 
 
+SYNAPTIC_PRUNE_INTERVAL = 100
+
+
 def _normalized_process_cpu_load(cpu_time_delta: float, wall_time_delta: float) -> float:
     if wall_time_delta <= 0:
         return 0.0
@@ -123,6 +126,9 @@ class NeuromorphicCognitivePipeline:
         # 2. DECOLLE SNN Local Learning
         layer_spikes, layer_readouts = self.snn.forward_sequence(inputs)
         self._record_synaptic_coactivations(layer_spikes)
+        pruned_synaptic_edges = 0
+        if (self.step + 1) % SYNAPTIC_PRUNE_INTERVAL == 0:
+            pruned_synaptic_edges = self.synaptic_graph.prune_inactive_edges()
 
         layer_losses = []
         if train_step:
@@ -254,6 +260,7 @@ class NeuromorphicCognitivePipeline:
             "connection_count": connection_count,
             "synaptic_graph_nodes": len(self.synaptic_graph.nodes),
             "synaptic_graph_edges": len(self.synaptic_graph.edges),
+            "pruned_synaptic_edges": pruned_synaptic_edges,
             "process_cpu_load": process_cpu_load,
             "layer_losses": layer_losses,
             "route": decision.value,

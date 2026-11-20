@@ -147,6 +147,56 @@ def test_pipeline_records_only_observed_synaptic_coactivations(monkeypatch):
     assert stats["synaptic_graph_edges"] == 2
 
 
+def test_pipeline_prunes_inactive_synapses_periodically():
+    pipeline = NeuromorphicCognitivePipeline(
+        input_dim=2,
+        hidden_dims=[2, 2],
+        num_classes=2,
+        device=torch.device("cpu"),
+    )
+    pipeline.synaptic_graph.record_coactivation("old_source", "old_target", timestamp=0.0)
+    pipeline.step = 99
+
+    stats = pipeline.process_batch(
+        inputs=torch.zeros(1, 2, 2),
+        targets=torch.zeros(1, dtype=torch.long),
+        train_step=False,
+    )
+
+    assert "old_source->old_target" not in pipeline.synaptic_graph.edges
+    assert stats["pruned_synaptic_edges"] == 1
+
+
+def test_synaptic_graph_remains_stable_for_fifty_training_epochs():
+    original_num_threads = torch.get_num_threads()
+    torch.set_num_threads(1)
+    pipeline = NeuromorphicCognitivePipeline(
+        input_dim=4,
+        hidden_dims=[4, 4],
+        num_classes=2,
+        device=torch.device("cpu"),
+    )
+    inputs = torch.ones(1, 2, 4)
+    targets = torch.zeros(1, dtype=torch.long)
+
+    try:
+        for _ in range(50):
+            pipeline.process_batch(inputs, targets, train_step=True)
+
+        assert pipeline.step == 50
+        assert all(torch.isfinite(layer.linear.weight).all() for layer in pipeline.snn.layers)
+        assert all(
+            torch.isfinite(torch.tensor(edge.weight))
+            for edge in pipeline.synaptic_graph.edges.values()
+        )
+        assert all(
+            len(node.activation_history) <= 100
+            for node in pipeline.synaptic_graph.nodes.values()
+        )
+    finally:
+        torch.set_num_threads(original_num_threads)
+
+
 def test_cautious_homeostasis_forces_system_two(monkeypatch):
     pipeline = NeuromorphicCognitivePipeline(
         input_dim=4,

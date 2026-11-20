@@ -24,6 +24,7 @@ class Edge:
     target_id: str
     weight: float
     last_activated: float
+    last_decayed: Optional[float] = None
 
 
 class SynapticGraphManager:
@@ -58,6 +59,7 @@ class SynapticGraphManager:
                     "target_id": edge.target_id,
                     "weight": edge.weight,
                     "last_activated": edge.last_activated,
+                    "last_decayed": edge.last_decayed,
                 }
                 for edge_key, edge in self.edges.items()
             },
@@ -103,6 +105,7 @@ class SynapticGraphManager:
                     target_id=edge_data["target_id"],
                     weight=edge_data["weight"],
                     last_activated=edge_data["last_activated"],
+                    last_decayed=edge_data.get("last_decayed"),
                 )
             except (KeyError, TypeError) as exc:
                 raise ValueError(f"Invalid edge data for {edge_key!r}") from exc
@@ -154,6 +157,7 @@ class SynapticGraphManager:
             edge = self.edges[edge_key]
             edge.weight += self.learning_rate * (1.0 - edge.weight)
             edge.last_activated = timestamp
+            edge.last_decayed = None
 
     def update_local_learning(self, node_a: str, node_b: str, time_window: float = 0.5) -> None:
         if node_a not in self.nodes or node_b not in self.nodes:
@@ -176,21 +180,25 @@ class SynapticGraphManager:
                 current_weight = self.edges[edge_key].weight
                 self.edges[edge_key].weight = current_weight + self.learning_rate * (1.0 - current_weight)
                 self.edges[edge_key].last_activated = now
+                self.edges[edge_key].last_decayed = None
 
-    def prune_inactive_edges(self, threshold: float = 0.1, max_idle_time: float = 10.0) -> None:
+    def prune_inactive_edges(self, threshold: float = 0.1, max_idle_time: float = 10.0) -> int:
         if max_idle_time <= 0:
-            return
+            return 0
         now = time.time()
         keys_to_delete: List[str] = []
 
         for edge_key, edge in self.edges.items():
             idle_duration = now - edge.last_activated
             if idle_duration > max_idle_time:
-                edge.weight -= self.decay_factor * (idle_duration / max_idle_time)
-                edge.last_activated = now
+                decay_start = edge.last_decayed or edge.last_activated + max_idle_time
+                decay_duration = max(0.0, now - decay_start)
+                edge.weight -= self.decay_factor * (decay_duration / max_idle_time)
+                edge.last_decayed = now
 
             if edge.weight < threshold:
                 keys_to_delete.append(edge_key)
 
         for key in keys_to_delete:
             del self.edges[key]
+        return len(keys_to_delete)
