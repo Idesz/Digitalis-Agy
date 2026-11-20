@@ -88,7 +88,28 @@ Start the dashboard:
 .\.venv\Scripts\python.exe dashboard_app.py --port 8000 --no-tui
 ```
 
-Keep the terminal open and visit <http://localhost:8000>. Press Ctrl+C in the terminal to stop the dashboard. To run the training cycle instead, use `.\.venv\Scripts\python.exe train.py`.
+Keep the terminal open and visit <http://localhost:8000>. Press Ctrl+C in the terminal to stop the dashboard.
+
+To run the default quick training (160 training and 160 test samples), use:
+
+```powershell
+.\.venv\Scripts\python.exe train.py
+```
+
+By default, this uses processed N-MNIST if present and otherwise reports that it is using synthetic data. To require real N-MNIST, first download and preprocess the official train/test archives (about 1.10 GiB total):
+
+```powershell
+.\.venv\Scripts\python.exe prepare_n_mnist.py
+.\.venv\Scripts\python.exe train.py --require-n-mnist
+```
+
+To train on all processed training samples and evaluate on the complete, separate test split:
+
+```powershell
+.\.venv\Scripts\python.exe train.py --require-n-mnist --all-train --all-test --epochs 3
+```
+
+Dataset files under `neuromorphic-brain/data/n_mnist/` are intentionally excluded from Git. Copy that directory to another machine or rerun the preparation command there. See the [project README](neuromorphic-brain/README.md) for benchmark and dataset details.
 
 ### 2. Docker & Docker Compose
 
