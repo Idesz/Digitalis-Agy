@@ -169,7 +169,7 @@ A projekt akkor tekinthető az eredeti elképzeléshez közelebbinek, ha a köve
 - [x] XOR és paritás mellett külön validációs és tesztelosztás.
 - [x] Held-out pontosság és loss jelentése.
 - [x] Hivatalos N-MNIST importáló, train/test szeparáció, gyors és teljes adatmód, külön teszt loss/pontosság és offline tesztek.
-- [ ] Teljes hivatalos adat letöltése és tényleges N-MNIST mérés. A lokális archívum nincs jelen, ezért itt még nem készült valós adaton számolt eredmény.
+- [ ] Teljes, többepochos N-MNIST tanítás és külön hivatalos tesztkiértékelés. A teljes adat helyben feldolgozva; az 1. epoch után megszakított futás 53,72% átlagos tanító batch-pontosságot ért el, de nem készült tesztmetrika.
 - [ ] Külső benchmarkadapterek; a helyi XOR/paritás/klasszifikációs futásoknál reprodukálható többségi osztály baseline elérhető.
 - [x] Online tanulás során új feladatra emlékezés és régi tudás visszaesésének mérése.
 - [x] Tanulási loss/pontosság, validációs checkpoint kiválasztása és külön teszteredmény reprodukálható parancssori futtatása.

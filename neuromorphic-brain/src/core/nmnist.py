@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from numbers import Integral
 from typing import Any, Callable, Optional
-from urllib.request import urlretrieve
+from urllib.request import Request, urlopen
 from zipfile import ZipFile
 
 import numpy as np
@@ -278,17 +278,35 @@ def _ensure_official_split(raw_dir: Path, split: str) -> _NMNISTArchiveSplit:
             raw_dir.mkdir(parents=True, exist_ok=True)
             temporary = archive_path.with_name(archive_path.name + ".download")
             try:
-                previous_reported = 0
-
-                def report_download(block_count: int, block_size: int, total_size: int) -> None:
-                    nonlocal previous_reported
-                    downloaded = block_count * block_size
-                    if block_count == 0 or downloaded - previous_reported >= 50 * 1024 * 1024:
-                        total = f"/{total_size / (1024 * 1024):.0f} MiB" if total_size > 0 else ""
-                        print(f"Downloading N-MNIST {split}: {downloaded / (1024 * 1024):.0f} MiB{total}")
-                        previous_reported = downloaded
-
-                urlretrieve(metadata["url"], temporary, reporthook=report_download)
+                request = Request(metadata["url"], headers={"User-Agent": "Mozilla/5.0"})
+                with urlopen(request, timeout=60) as response:
+                    content_length = response.headers.get("Content-Length")
+                    total_size = int(content_length) if content_length else None
+                    downloaded = 0
+                    previous_reported = 0
+                    with temporary.open("wb") as destination:
+                        while True:
+                            chunk = response.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            destination.write(chunk)
+                            downloaded += len(chunk)
+                            if downloaded - previous_reported >= 50 * 1024 * 1024:
+                                total = (
+                                    f"/{total_size / (1024 * 1024):.0f} MiB"
+                                    if total_size is not None
+                                    else ""
+                                )
+                                print(
+                                    f"Downloading N-MNIST {split}: "
+                                    f"{downloaded / (1024 * 1024):.0f} MiB{total}"
+                                )
+                                previous_reported = downloaded
+                    if total_size is not None and downloaded != total_size:
+                        raise IOError(
+                            f"Incomplete N-MNIST {split} archive download: "
+                            f"expected {total_size} bytes, got {downloaded}"
+                        )
                 if _md5(temporary) != metadata["md5"]:
                     raise ValueError(f"MD5 checksum mismatch for official N-MNIST {split} archive")
                 temporary.replace(archive_path)
