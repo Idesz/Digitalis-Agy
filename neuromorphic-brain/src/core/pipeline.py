@@ -25,6 +25,7 @@ from src.memory.sleep_consolidation import SleepConsolidator
 from src.homeostasis.state_vector import HomeostaticState, BehavioralMode
 from src.predictive.residual_error import ResidualPredictiveModule
 from src.routing.cdr_router import CDRRouter, SystemRoute, TaskRoutingContext
+from src.routing.uncertainty import RollingUncertaintyCalibrator, representation_drift
 from src.world_model.jepa_simulator import JEPASimulator
 from src.world_model.planner import LatentBeamPlanner
 
@@ -94,6 +95,8 @@ class NeuromorphicCognitivePipeline:
 
         # Pillar 5: Cognitive Decision Router (CDR)
         self.router = CDRRouter(tau=0.5)
+        self.uncertainty_calibrator = RollingUncertaintyCalibrator()
+        self._previous_mean_representation: Optional[torch.Tensor] = None
 
         # Pillar 6: JEPA World Model
         self.world_model = JEPASimulator(
@@ -188,6 +191,16 @@ class NeuromorphicCognitivePipeline:
         # Latent representation from top SNN layer (mean spike trace)
         top_spikes = layer_spikes[-1].mean(dim=1)  # [batch_size, hidden_dims[-1]]
         latent_repr = top_spikes[0].detach().cpu().numpy().tolist()
+        mean_representation = top_spikes.mean(dim=0).detach()
+        representation_change = representation_drift(
+            self._previous_mean_representation,
+            mean_representation,
+        )
+        self._previous_mean_representation = mean_representation
+        raw_uncertainty = max(float(mean_surprise.item()), representation_change)
+        calibrated_uncertainty, uncertainty_calibration_ready = (
+            self.uncertainty_calibrator.update(raw_uncertainty)
+        )
 
         if train_step and transition_actions is not None:
             observed_latents = layer_spikes[-1].detach()
@@ -223,7 +236,7 @@ class NeuromorphicCognitivePipeline:
         )
         predictive_uncertainty = max(
             float(self.homeostasis.uncertainty),
-            float(mean_surprise.item()),
+            calibrated_uncertainty,
         )
 
         decision, complexity, metrics = self.router.route(
@@ -246,10 +259,10 @@ class NeuromorphicCognitivePipeline:
             surprise=float(mean_surprise.item()),
             task_error=task_error,
             system_load=process_cpu_load,
-            entropy=max(float(complexity), float(mean_surprise.item())),
+            entropy=max(float(complexity), calibrated_uncertainty),
         )
         mode = self.homeostasis.get_behavioral_mode()
-        prediction_escalated = float(mean_surprise.item()) > self.prediction_escalation_threshold
+        prediction_escalated = calibrated_uncertainty > self.prediction_escalation_threshold
         if mode == BehavioralMode.CAUTIOUS or prediction_escalated:
             decision = SystemRoute.SLOW
 
@@ -307,6 +320,10 @@ class NeuromorphicCognitivePipeline:
             "accuracy": batch_accuracy,
             "pred_loss": pred_loss.item(),
             "surprise": mean_surprise.item(),
+            "representation_change": representation_change,
+            "raw_uncertainty": raw_uncertainty,
+            "calibrated_uncertainty": calibrated_uncertainty,
+            "uncertainty_calibration_ready": uncertainty_calibration_ready,
             "layer_activity": layer_activity,
             "spike_count": spike_count,
             "connection_count": connection_count,

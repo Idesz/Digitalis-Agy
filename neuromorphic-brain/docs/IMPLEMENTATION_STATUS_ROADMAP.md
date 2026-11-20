@@ -117,7 +117,8 @@ Kapcsolódó dokumentáció:
 
 4. **A CDR valós bemenetei részben bekötöttek.**
    - A pipeline explicit task-domain/entity kontextust, hasonló epizódokat és kapcsolódó szemantikus részgráfot használ.
-   - Külső alkalmazásoknak még saját domain-, érintett- és függőségi metaadatot kell szolgáltatniuk; a bizonytalanság jelenleg nincs kalibrálva.
+   - A prediktív meglepetés és a batch-átlagos tüskearány-változás gördülő percentilis-alapú bizonytalansági pontszámot ad; ez relatív anomáliapontszám, nem hibavalószínűség.
+   - Külső alkalmazásoknak még saját domain-, érintett- és függőségi metaadatot kell szolgáltatniuk.
 
 5. **A szemantikus tudás tartós, de nem elosztott.**
    - Verziózott JSON checkpointból betöltődik, és konszolidáció után atomi fájlcserével mentődik.
@@ -126,7 +127,7 @@ Kapcsolódó dokumentáció:
 ### 4.2 Jelentős hiányosságok
 
 - Nincs Mamba vagy más dokumentált állapottérmodell a prediktív modulban.
-- Hiányzik a reprezentációk időbeli változását mérő, kalibrált bizonytalanság.
+- Nincs a predikciós hibához illesztett valószínűségi kalibráció; a CDR jelenlegi gördülő percentilise relatív anomáliapontszám.
 - A memória-, router- és JEPA-módosítások nem rendelkeznek felülírási és visszaállítási szabályzattal.
 - Az épített benchmarkkatalógus nem tartalmaz valódi MMLU, HumanEval, GSM8K vagy MATH adaptert.
 - Nincs CPU-/memória-/latencia mérés szervezeti vagy többprocesszes környezetben.
@@ -161,6 +162,7 @@ A projekt akkor tekinthető az eredeti elképzeléshez közelebbinek, ha a köve
 - [x] Kockázattal súlyozott beam search integrálva mint dokumentált alternatíva.
 - [ ] Szemantikus részgráf és epizodikus hasonlóság a tervező bemenetében.
 - [ ] A Rendszer 2 csak skálázott, mérhető bonyolultság és bizonytalanság esetén indul.
+- [x] A CDR méri a batch-ek közötti reprezentációváltozást, és 30 mintás bemelegedés után legfeljebb 256 korábbi pontszámhoz viszonyítva kalibrálja az anomáliapontszámot.
 
 ### Fázis 4 – Mérhető tanulási eredmény
 

@@ -168,6 +168,8 @@ class TaskRoutingContext:
     entity_ids: tuple[str, ...] = ()
 ```
 
+`NeuromorphicCognitivePipeline.process_batch()` reports `representation_change`, `raw_uncertainty`, `calibrated_uncertainty`, and `uncertainty_calibration_ready`. The calibrated value is a rolling empirical percentile of predictive surprise and batch-mean firing-rate change, based on up to 256 prior batches after a 30-batch warm-up. It is a relative anomaly score, not a calibrated probability of classification error. Its history is in-memory and resets when a pipeline is recreated.
+
 Routing dimensions and the threshold are finite values in `[0, 1]`; stakeholder counts must be non-negative integers. Invalid values or all-zero/negative routing weights are rejected instead of silently clipped.
 The pipeline accepts `TaskRoutingContext` per batch. It combines explicit task domains and entities with similar episodic event metadata and connected semantic-graph nodes/relations to estimate domain crossing and entity count; it no longer infers domain complexity from batch accuracy.
 

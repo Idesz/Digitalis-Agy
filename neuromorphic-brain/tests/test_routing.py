@@ -1,5 +1,7 @@
 import pytest
+import torch
 from src.routing.cdr_router import CDRRouter, SystemRoute, TaskRoutingContext
+from src.routing.uncertainty import RollingUncertaintyCalibrator, representation_drift
 
 
 def test_task_routing_context_normalizes_and_validates_fields():
@@ -87,3 +89,29 @@ def test_cdr_rejects_invalid_routing_dimensions(overrides):
 
     with pytest.raises(ValueError):
         CDRRouter().route(**inputs)
+
+
+def test_rolling_uncertainty_calibrator_uses_ties_and_bounded_history():
+    calibrator = RollingUncertaintyCalibrator(window_size=3, min_samples=2)
+
+    assert calibrator.update(0.2) == (0.2, False)
+    assert calibrator.update(0.2) == (0.2, False)
+    assert calibrator.update(0.2) == (0.5, True)
+    assert calibrator.update(0.9) == (0.875, True)
+    assert calibrator.update(0.0) == (0.125, True)
+    assert calibrator.update(0.95) == (0.875, True)
+
+
+@pytest.mark.parametrize("score", [float("nan"), -0.1, 1.1, True])
+def test_rolling_uncertainty_calibrator_rejects_invalid_scores(score):
+    with pytest.raises(ValueError, match="score"):
+        RollingUncertaintyCalibrator().update(score)
+
+
+def test_representation_drift_measures_normalized_rate_change():
+    previous = torch.tensor([1.0, 0.0, 0.0])
+
+    assert representation_drift(None, previous) == 0.0
+    assert representation_drift(previous, previous) == 0.0
+    assert representation_drift(torch.ones(3), torch.full((3,), 0.5)) == 0.5
+    assert representation_drift(previous, previous.flip(0)) == pytest.approx(2.0 / 3.0)

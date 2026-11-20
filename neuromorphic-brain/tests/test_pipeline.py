@@ -285,12 +285,50 @@ def test_predictive_surprise_escalates_route(monkeypatch):
     )
 
     assert observed_router_args["uncertainty"] == pytest.approx(0.9)
+    assert stats["raw_uncertainty"] == pytest.approx(0.9)
+    assert stats["calibrated_uncertainty"] == pytest.approx(0.9)
+    assert stats["uncertainty_calibration_ready"] is False
     assert stats["prediction_escalated"] is True
     assert stats["route"] == "SLOW_SYSTEM_2"
     assert stats["world_model_transition_count"] == 15
     assert stats["selected_world_model_action"] in range(5)
     assert len(stats["planned_action_sequence"]) == 3
     assert stats["simulated_rollout_risk"] is not None
+
+
+def test_pipeline_includes_representation_drift_in_uncertainty(monkeypatch):
+    pipeline = NeuromorphicCognitivePipeline(
+        input_dim=4,
+        hidden_dims=[4],
+        num_classes=2,
+        device=torch.device("cpu"),
+    )
+    representations = [
+        torch.tensor([[[1.0, 0.0, 0.0, 0.0]] * 2] * 2),
+        torch.tensor([[[0.0, 1.0, 0.0, 0.0]] * 2] * 2),
+    ]
+
+    def forward_sequence(_inputs):
+        spikes = representations.pop(0)
+        readouts = torch.tensor([[2.0, 0.0], [2.0, 0.0]])
+        return [spikes], [readouts]
+
+    monkeypatch.setattr(pipeline.snn, "forward_sequence", forward_sequence)
+    monkeypatch.setattr(
+        pipeline.predictive,
+        "gated_loss",
+        lambda inputs: (torch.tensor(0.0), torch.tensor(0.1), False),
+    )
+    inputs = torch.zeros(2, 2, 4)
+    targets = torch.zeros(2, dtype=torch.long)
+
+    first = pipeline.process_batch(inputs, targets, train_step=False)
+    second = pipeline.process_batch(inputs, targets, train_step=False)
+
+    assert first["representation_change"] == 0.0
+    assert second["representation_change"] == pytest.approx(0.5)
+    assert second["raw_uncertainty"] == pytest.approx(0.5)
+    assert second["uncertainty_calibration_ready"] is False
 
 
 def test_pipeline_routes_using_task_context_and_semantic_dependencies(monkeypatch):
