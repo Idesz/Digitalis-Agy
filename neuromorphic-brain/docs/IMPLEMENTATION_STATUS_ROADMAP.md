@@ -27,7 +27,7 @@ Ez a dokumentum a dokumentált célállapotot, a jelenlegi implementációt és 
 | Alvási konszolidáció | Cosine-klaszterezés, redundanciaszűrés, driftvédelem és időzített háttérworker | A memóriafolyamatok egy példányon belül működnek; többfolyamatos ütemezés hiányzik |
 | Globális homeosztázis | Négy belső állapot és viselkedési mód | Megvalósult prototípus |
 | Prediktív kódolás | PyTorch autoenkóder és meglepetési küszöb | Alapmodell megvan; Mamba SSM hiányzik |
-| CDR útvonalválasztás | Súlyozott, validált négydimenziós router | A fő bemenetek jelentős része még kiegészítésre szorul |
+| CDR útvonalválasztás | Explicit feladatdomének, epizodikus hasonlóság és szemantikus entity/kapcsolat | Bizonytalanság-kalibráció és valós külső feladatmetaadat még szükséges |
 | Rendszer 1 / 2 architektúra | Elkülönült rövid és lassú router osztály | A Rendszer 2 még demonstratív |
 | JEPA világmodell | Tanítható látens átmenet- és értékfej | Prototípus; valódi akció- és környezetmodell hiányzik |
 | Webdashboard és API | Futtatható dashboard, telemetria és tanítási vezérlés | Helyi prototípusokra jól illeszkedik |
@@ -115,10 +115,9 @@ Kapcsolódó dokumentáció:
    - A JEPA nem cselekvésekből tanul meg környezeti dinamikát, hanem neutral vagy egyhot osztályjelöltekből.
    - Az egyik különálló JEPA sandbox nincs integrálva a fő döntési folyamatba.
 
-4. **A CDR még nem valós feladatdimenziókat mér.**
-   - A `stakeholder_count` a pipeline-ban fixen egy.
-   - A domain-crossing becslése csak batch-pontosságon alapul.
-   - A router nem olvas valós szemantikus részgráfot vagy entitásfüggőséget.
+4. **A CDR valós bemenetei részben bekötöttek.**
+   - A pipeline explicit task-domain/entity kontextust, hasonló epizódokat és kapcsolódó szemantikus részgráfot használ.
+   - Külső alkalmazásoknak még saját domain-, érintett- és függőségi metaadatot kell szolgáltatniuk; a bizonytalanság jelenleg nincs kalibrálva.
 
 5. **A szemantikus tudás tartós, de nem elosztott.**
    - Verziózott JSON checkpointból betöltődik, és konszolidáció után atomi fájlcserével mentődik.

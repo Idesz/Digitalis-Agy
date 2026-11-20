@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 from src.core.dataset import get_neuromorphic_dataloader
 from src.core.pipeline import NeuromorphicCognitivePipeline
 from src.dashboard.monitor import global_monitor
+from src.routing.cdr_router import TaskRoutingContext
 
 
 def main():
@@ -81,7 +82,17 @@ def main():
         routes_taken = {"FAST_SYSTEM_1": 0, "SLOW_SYSTEM_2": 0}
 
         for batch_idx, (inputs, targets) in enumerate(loader):
-            stats = agent.process_batch(inputs, targets, train_step=True)
+            stats = agent.process_batch(
+                inputs,
+                targets,
+                train_step=True,
+                routing_context=TaskRoutingContext(
+                    domains=(loader.dataset.task,),
+                    entity_ids=tuple(
+                        f"class_{label}" for label in sorted(set(targets.tolist()))
+                    ),
+                ),
+            )
 
             cur_v = stats["state_vector"]
             global_monitor.update({

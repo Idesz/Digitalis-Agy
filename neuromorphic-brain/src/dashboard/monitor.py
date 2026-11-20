@@ -439,6 +439,7 @@ class BrainStateMonitor:
 
             from src.core.dataset import get_neuromorphic_dataloader
             from src.core.pipeline import NeuromorphicCognitivePipeline
+            from src.routing.cdr_router import TaskRoutingContext
 
             task, _, _, num_classes = _resolve_training_task(prompt)
             agent = NeuromorphicCognitivePipeline(
@@ -477,7 +478,17 @@ class BrainStateMonitor:
                 for batch_x, batch_y in loader:
                     if self.training_stop_event.is_set():
                         break
-                    stats = agent.process_batch(batch_x, batch_y, train_step=True)
+                    stats = agent.process_batch(
+                        batch_x,
+                        batch_y,
+                        train_step=True,
+                        routing_context=TaskRoutingContext(
+                            domains=(task,),
+                            entity_ids=tuple(
+                                f"class_{label}" for label in sorted(set(batch_y.tolist()))
+                            ),
+                        ),
+                    )
                     telemetry = build_dashboard_telemetry(
                         stats,
                         agent,

@@ -161,9 +161,15 @@ class CDRRouter:
         """
         Calculates gating metric Phi(q) and routes to FAST or SLOW system.
         """
+
+@dataclass(frozen=True)
+class TaskRoutingContext:
+    domains: tuple[str, ...] = ()
+    entity_ids: tuple[str, ...] = ()
 ```
 
 Routing dimensions and the threshold are finite values in `[0, 1]`; stakeholder counts must be non-negative integers. Invalid values or all-zero/negative routing weights are rejected instead of silently clipped.
+The pipeline accepts `TaskRoutingContext` per batch. It combines explicit task domains and entities with similar episodic event metadata and connected semantic-graph nodes/relations to estimate domain crossing and entity count; it no longer infers domain complexity from batch accuracy.
 
 ### World Model (`src/world_model/jepa_simulator.py`)
 ```python

@@ -2,6 +2,7 @@ import pytest
 import urllib.request
 import json
 import threading
+import torch
 import dashboard_app
 from src.dashboard.monitor import (
     BrainStateMonitor,
@@ -309,13 +310,13 @@ def test_simulation_launcher_keeps_server_available_after_simulation(monkeypatch
             server_state["closed"] = True
 
     class FakeLoader:
-        dataset = type("Dataset", (), {"data_source": "N-MNIST"})()
+        dataset = type("Dataset", (), {"data_source": "N-MNIST", "task": "classification"})()
 
         def __len__(self):
             return 1
 
         def __iter__(self):
-            return iter([(None, None)])
+            return iter([(None, torch.tensor([0]))])
 
     class FakeAgent:
         def __init__(self, **kwargs):
@@ -331,7 +332,7 @@ def test_simulation_launcher_keeps_server_available_after_simulation(monkeypatch
                 },
             )()
 
-        def process_batch(self, inputs, targets, train_step):
+        def process_batch(self, inputs, targets, train_step, routing_context=None):
             self.step += 1
             return {
                 "step": self.step,
@@ -481,7 +482,7 @@ def test_training_loop_uses_learning_rate_and_reports_completion(monkeypatch):
             return 1
 
         def __iter__(self):
-            return iter([(None, None)])
+            return iter([(None, torch.tensor([0]))])
 
     class FakeAgent:
         def __init__(self, **kwargs):
@@ -497,7 +498,7 @@ def test_training_loop_uses_learning_rate_and_reports_completion(monkeypatch):
                 },
             )()
 
-        def process_batch(self, inputs, targets, train_step):
+        def process_batch(self, inputs, targets, train_step, routing_context=None):
             return {
                 "step": 7,
                 "loss": 0.25,

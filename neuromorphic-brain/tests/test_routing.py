@@ -1,5 +1,16 @@
 import pytest
-from src.routing.cdr_router import CDRRouter, SystemRoute
+from src.routing.cdr_router import CDRRouter, SystemRoute, TaskRoutingContext
+
+
+def test_task_routing_context_normalizes_and_validates_fields():
+    context = TaskRoutingContext(domains=["math", "math"], entity_ids=("a", "b", "a"))
+
+    assert context.domains == ("math",)
+    assert context.entity_ids == ("a", "b")
+    with pytest.raises(ValueError, match="domains"):
+        TaskRoutingContext(domains="math")
+    with pytest.raises(ValueError, match="entity_ids"):
+        TaskRoutingContext(entity_ids=("entity", ""))
 
 
 def test_cdr_routing_fast_path():

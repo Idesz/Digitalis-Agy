@@ -2,7 +2,8 @@ import pytest
 import torch
 from src.core.dataset import NeuromorphicDataset, get_neuromorphic_dataloader
 from src.core.pipeline import NeuromorphicCognitivePipeline, _normalized_process_cpu_load
-from src.routing.cdr_router import SystemRoute
+from src.memory.episodic_memory import EpisodicEvent
+from src.routing.cdr_router import SystemRoute, TaskRoutingContext
 from src.dashboard.monitor import build_dashboard_telemetry
 
 
@@ -270,6 +271,43 @@ def test_predictive_surprise_escalates_route(monkeypatch):
     assert stats["prediction_escalated"] is True
     assert stats["route"] == "SLOW_SYSTEM_2"
     assert stats["selected_world_model_action"] in (0, 1)
+
+
+def test_pipeline_routes_using_task_context_and_semantic_dependencies(monkeypatch):
+    pipeline = NeuromorphicCognitivePipeline(
+        input_dim=4,
+        hidden_dims=[4, 2],
+        num_classes=2,
+        device=torch.device("cpu"),
+    )
+    pipeline.semantic_mem.add_concept("entity_a", {"domain": "math"})
+    pipeline.semantic_mem.add_concept("entity_b", {"domain": "safety"})
+    pipeline.semantic_mem.add_relation("entity_a", "entity_b", "depends_on")
+    event = EpisodicEvent(
+        embedding=[1.0, 0.0],
+        context={"concept": "entity_a", "related_to": "entity_b", "domain": "vision"},
+    )
+    monkeypatch.setattr(pipeline.episodic_mem, "search_similar", lambda *args, **kwargs: [(event, 0.9)])
+    observed = {}
+
+    def capture_route(**kwargs):
+        observed.update(kwargs)
+        return SystemRoute.FAST, 0.1, {}
+
+    monkeypatch.setattr(pipeline.router, "route", capture_route)
+    pipeline.process_batch(
+        inputs=torch.zeros(1, 2, 4),
+        targets=torch.zeros(1, dtype=torch.long),
+        train_step=False,
+        routing_context=TaskRoutingContext(
+            domains=("finance",),
+            entity_ids=("entity_a",),
+        ),
+    )
+
+    assert observed["correlation_strength"] == pytest.approx(0.9)
+    assert observed["domain_crossing"] == pytest.approx(0.75)
+    assert observed["stakeholder_count"] == 2
 
 
 @pytest.mark.parametrize(

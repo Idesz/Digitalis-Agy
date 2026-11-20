@@ -12,6 +12,7 @@ Evaluates 4 core dimensions:
 Gating rule: R(q) = FAST if f(C_s, D_c, S_m, U_l) < tau else SLOW.
 """
 
+from dataclasses import dataclass
 from typing import Dict, Tuple
 from enum import Enum
 import math
@@ -21,6 +22,27 @@ import numpy as np
 class SystemRoute(str, Enum):
     FAST = "FAST_SYSTEM_1"
     SLOW = "SLOW_SYSTEM_2"
+
+
+@dataclass(frozen=True)
+class TaskRoutingContext:
+    """Explicit domain and entity identifiers associated with one task batch."""
+
+    domains: tuple[str, ...] = ()
+    entity_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        for field_name in ("domains", "entity_ids"):
+            values = getattr(self, field_name)
+            if isinstance(values, str):
+                raise ValueError(f"{field_name} must be a sequence of non-empty strings")
+            try:
+                normalized = tuple(dict.fromkeys(values))
+            except TypeError as exc:
+                raise ValueError(f"{field_name} must be a sequence of non-empty strings") from exc
+            if any(not isinstance(value, str) or not value.strip() for value in normalized):
+                raise ValueError(f"{field_name} must contain only non-empty strings")
+            object.__setattr__(self, field_name, normalized)
 
 
 class CDRRouter:

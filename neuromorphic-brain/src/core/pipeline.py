@@ -24,7 +24,7 @@ from src.memory.semantic_memory import SemanticMemory
 from src.memory.sleep_consolidation import SleepConsolidator
 from src.homeostasis.state_vector import HomeostaticState, BehavioralMode
 from src.predictive.residual_error import ResidualPredictiveModule
-from src.routing.cdr_router import CDRRouter, SystemRoute
+from src.routing.cdr_router import CDRRouter, SystemRoute, TaskRoutingContext
 from src.world_model.jepa_simulator import JEPASimulator
 
 
@@ -104,12 +104,15 @@ class NeuromorphicCognitivePipeline:
         inputs: torch.Tensor,
         targets: torch.Tensor,
         train_step: bool = True,
+        routing_context: Optional[TaskRoutingContext] = None,
     ) -> Dict[str, Any]:
         """
         Executes a complete cognitive cycle over a batch of spatio-temporal inputs:
         inputs: [batch_size, time_steps, input_dim]
         targets: [batch_size]
         """
+        if routing_context is not None and not isinstance(routing_context, TaskRoutingContext):
+            raise TypeError("routing_context must be a TaskRoutingContext")
         batch_size, time_steps, _ = inputs.shape
         inputs = inputs.to(self.device)
         targets = targets.to(self.device)
@@ -180,8 +183,12 @@ class NeuromorphicCognitivePipeline:
 
         # 3. CDR Decision Routing
         # Retrieve similar past memories to compute familiarity / correlation
-        similar_episodes = self.episodic_mem.search_similar(latent_repr, limit=1)
-        corr_strength = similar_episodes[0][1] if similar_episodes else 0.2
+        similar_episodes = self.episodic_mem.search_similar(latent_repr, limit=5)
+        corr_strength = max((score for _, score in similar_episodes), default=0.0)
+        domain_crossing, stakeholder_count = self._routing_context_metrics(
+            similar_episodes,
+            routing_context or TaskRoutingContext(),
+        )
         predictive_uncertainty = max(
             float(self.homeostasis.uncertainty),
             float(mean_surprise.item()),
@@ -189,8 +196,8 @@ class NeuromorphicCognitivePipeline:
 
         decision, complexity, metrics = self.router.route(
             correlation_strength=float(corr_strength),
-            domain_crossing=0.2 if batch_accuracy > 0.5 else 0.7,
-            stakeholder_count=1,
+            domain_crossing=domain_crossing,
+            stakeholder_count=stakeholder_count,
             uncertainty=predictive_uncertainty,
         )
 
@@ -242,6 +249,11 @@ class NeuromorphicCognitivePipeline:
             context={
                 "concept": f"class_{targets[0].item()}",
                 "category": "digit",
+                "domain": (
+                    routing_context.domains[0]
+                    if routing_context and routing_context.domains
+                    else "classification"
+                ),
                 "route": decision.value,
                 "related_to": f"parity_{targets[0].item() % 2}",
             },
@@ -297,3 +309,55 @@ class NeuromorphicCognitivePipeline:
                     source_id=f"layer_{layer_index}:neuron_{source_neuron}",
                     target_id=f"layer_{layer_index + 1}:neuron_{target_neuron}",
                 )
+
+    def _routing_context_metrics(
+        self,
+        similar_episodes: list[tuple[EpisodicEvent, float]],
+        context: TaskRoutingContext,
+    ) -> tuple[float, int]:
+        domains = set(context.domains)
+        entities = set(context.entity_ids)
+        cross_domain_relations = set()
+
+        for event, _ in similar_episodes:
+            event_context = event.context
+            event_domain = event_context.get("domain", event_context.get("category"))
+            if isinstance(event_domain, str) and event_domain:
+                domains.add(event_domain)
+            for key in ("concept", "related_to"):
+                entity = event_context.get(key)
+                if isinstance(entity, str) and entity:
+                    entities.add(entity)
+
+        for entity in tuple(entities):
+            concept = self.semantic_mem.get_concept(entity)
+            if concept is None:
+                continue
+            concept_domain = concept.get("domain", concept.get("category"))
+            if isinstance(concept_domain, str) and concept_domain:
+                domains.add(concept_domain)
+            subgraph = self.semantic_mem.query_subgraph(entity, depth=1)
+            node_domains = {
+                node["id"]: node["attrs"].get("domain", node["attrs"].get("category"))
+                for node in subgraph["nodes"]
+            }
+            entities.update(node_domains)
+            domains.update(
+                domain for domain in node_domains.values()
+                if isinstance(domain, str) and domain
+            )
+            for edge in subgraph["edges"]:
+                source_domain = node_domains.get(edge["source"])
+                target_domain = node_domains.get(edge["target"])
+                if (
+                    isinstance(source_domain, str)
+                    and isinstance(target_domain, str)
+                    and source_domain != target_domain
+                ):
+                    cross_domain_relations.add(
+                        tuple(sorted((source_domain, target_domain)))
+                    )
+
+        crossing_units = max(len(domains) - 1, len(cross_domain_relations))
+        domain_crossing = min(crossing_units / 4.0, 1.0)
+        return domain_crossing, max(1, len(entities))

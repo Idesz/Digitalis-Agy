@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 from src.dashboard.monitor import build_dashboard_telemetry, global_monitor, start_dashboard_server
 from src.core.dataset import get_neuromorphic_dataloader
 from src.core.pipeline import NeuromorphicCognitivePipeline
+from src.routing.cdr_router import TaskRoutingContext
 
 
 def run_simulation(
@@ -103,7 +104,17 @@ def run_simulation(
 
         for epoch in range(1, 4):
             for batch_x, batch_y in loader:
-                stats = agent.process_batch(batch_x, batch_y, train_step=True)
+                stats = agent.process_batch(
+                    batch_x,
+                    batch_y,
+                    train_step=True,
+                    routing_context=TaskRoutingContext(
+                        domains=(loader.dataset.task,),
+                        entity_ids=tuple(
+                            f"class_{label}" for label in sorted(set(batch_y.tolist()))
+                        ),
+                    ),
+                )
                 telemetry = build_dashboard_telemetry(
                     stats,
                     agent,
