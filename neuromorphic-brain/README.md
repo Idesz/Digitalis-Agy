@@ -3,6 +3,7 @@
 Comprehensive documentation and instructions for running the neuromorphic agent and live dashboard.
 
 Refer to:
+- [Agent cél és fejlesztési terv](docs/AGENT_CEL.md)
 - [Dashboard and Training Guide](docs/DASHBOARD_TRAINING_GUIDE.md)
 - [Detailed Architecture Specification](docs/ARCHITECTURE.md)
 - [API Specifications](docs/API_SPECIFICATION.md)
