@@ -1,6 +1,6 @@
 # Neuromorphic Brain Emulation Platform
 
-Comprehensive documentation and instructions for running the neuromorphic agent and live dashboard.
+Documentation and instructions for the neuromorphic learning and memory prototype and live dashboard.
 
 Refer to:
 - [Agent cél és fejlesztési terv](docs/AGENT_CEL.md)

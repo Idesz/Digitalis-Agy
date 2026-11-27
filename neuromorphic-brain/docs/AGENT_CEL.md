@@ -23,7 +23,15 @@ A projekt neuromorf tanulási és memória-prototípus. Nem általános, szöveg
 | Eszközhasználat | Nincs eszköz-regiszter, eszközválasztó, végrehajtó-hurok, jogosultsági modell vagy sandboxos tanítás |
 | Külső benchmarkok | Helyi XOR/paritás/osztályozási benchmarkok vannak; MMLU, HumanEval és hasonló feladatok adapterei nincsenek bekötve. Egyes külső rangsoradatok lekérése nem azonos benchmarkfuttatóval |
 
-A jelenlegi teljes automatikus tesztcsomag ellenőrzéskor 159 sikeres teszttel futott le. Ez a meglévő kód tesztjeire vonatkozik; nem igazolja az általános agentcél teljesülését.
+A meglévő kód tesztjei önmagukban nem igazolják az általános agentcél teljesülését. A tesztcsomag aktuális eredménye a projekt gyökeréből ezzel a paranccsal ellenőrizhető:
+
+```powershell
+& '.\neuromorphic-brain\.venv\Scripts\python.exe' -m pytest '.\neuromorphic-brain\tests' -q
+```
+
+Az eredmény mellé érdemes rögzíteni a dátumot, a commitot és a tesztesetek számát; ezek verziónként változhatnak.
+
+Utolsó dokumentált futtatás: 2026-11-27, 159 sikeres teszt. Ez a projekt meglévő kódját ellenőrzi, és nem igazolja az általános agentcél teljesülését.
 
 Részletek:
 
@@ -55,6 +63,8 @@ Minden eszköznek géppel ellenőrizhető leírása legyen: neve, célja, param�
 - Külön kell választani a modellt, az agent vezérlőhurkát, az eszközöket, a memóriát és az értékelőt.
 - Meg kell határozni, mely feladatok igényelnek olvasást, írást, böngészést, API-hívást vagy asztali alkalmazáskezelést.
 - Készüljön rögzített, nem tanításra használt tesztkészlet az összehasonlításhoz.
+- A kezdeti mérés legalább 30, korábban nem látott feladatot tartalmazzon, külön olvasási, írási és ellenőrzési esetekkel. Rögzítse a feladat sikerességét, a kimenet érvényességét, a tiltott műveletek próbálkozásait és az erőforrásigényt.
+- Minden futáshoz rögzíteni kell a modell- és eszközverziót, a konfigurációt, a tesztkészlet verzióját, a véletlenmagot (ha van), valamint a dátumot és a commitot.
 
 ### 1. szakasz – Olvasás és írás egy fájlsandboxban
 
@@ -64,6 +74,8 @@ Minden eszköznek géppel ellenőrizhető leírása legyen: neve, célja, param�
 - A feladatok például strukturált szöveg kinyerése, egy szövegfájl szerkesztése és a módosítás ellenőrzése lehetnek.
 
 **Elfogadási feltétel:** a feladatok külön, korábban nem látott teszteken is teljesülnek; a kimenet megfelel a specifikációnak; tiltott útvonalhoz vagy művelethez nem fér hozzá; minden fájlváltozás visszaállítható és naplózott.
+
+**Kezdeti mérhető kapu:** legalább 30 rögzített, held-out feladat három egymástól független futásában a feladatok legalább 90%-a teljesüljön a specifikáció szerint. Legalább 20, útvonal- és jogosultsághatárra irányuló negatív teszt egyikében se történjen tiltott olvasás vagy módosítás; a sandboxon kívüli fájlrendszer-módosítás elfogadható száma nulla. Minden engedélyezett módosítás legyen naplózott és visszaállítható. Ezek induló küszöbök, amelyeket a kockázat és az alapmérés alapján, a tesztek megtekintése előtt kell véglegesíteni.
 
 ### 2. szakasz – További eszközök és több lépéses feladatok
 
@@ -98,6 +110,9 @@ Minden eszköznek géppel ellenőrizhető leírása legyen: neve, célja, param�
 - Legyen CPU-, memória-, idő- és kimenetméret-korlát, valamint naplózás és azonnali leállítás.
 - A tanult eszközpolitika ne módosíthassa saját jogosultságait vagy biztonsági szabályait.
 - A teszteredmény soha ne adjon automatikusan korlátlan hozzáférést a teljes géphez.
+- A fájlok, weboldalak és eszközkimenetek nem megbízható adatnak számítsanak, ne utasításnak. A tesztek fedjék le az ezekbe ágyazott, jogosultságot vagy titkokat kicsalni próbáló utasításokat, valamint a titkok naplóba vagy kimenetbe kerülését.
+- Az útvonaltesztek fedjék le az abszolút és relatív útvonalakat, a könyvtárbejárást, a szimbolikus hivatkozásokat és Windows alatt a junctionöket is. A védelmet elkülönített futtatókörnyezet és ellenőrzött fájlműveletek biztosítsák; ne csak útvonal-karakterláncok vizsgálatára támaszkodjon.
+- A hibatesztek között szerepeljen megszakított vagy sikertelen írás, időtúllépés, túlméretes kimenet és visszaállítási hiba is; ezek ne eredményezzenek sikeresnek jelzett, de nem ellenőrzött állapotot.
 
 ## 6. Mi maradjon a neuromorf projekt szerepe?
 
@@ -116,7 +131,7 @@ Az első agentverzió megkezdése előtt rögzíteni kell:
 
 1. Melyik modellt használja a rendszer: meglévő helyi/felhős nyelvi modellt, vagy saját modell betanítása a cél?
 2. Melyek legyenek az első sandboxos feladatok és engedélyezett eszközök?
-3. Milyen tesztpontszám, ismételhetőség és biztonsági feltétel szükséges a következő szakaszba lépéshez?
+3. Az első szakasz induló, javasolt küszöbei (legalább 30 held-out feladat, három futásban legalább 90%-os siker, legalább 20 negatív biztonsági tesztben nulla tiltott hozzáférés) megfelelnek-e a választott feladatok kockázatának, vagy szigorítani kell őket?
 4. A valódi gépes próba alatt mely műveletek maradjanak mindig emberi jóváhagyáshoz kötve?
 
 Ezek a döntések jelentősen befolyásolják a rendszer architektúráját, költségét és biztonsági modelljét; nem szabad őket pusztán technológiai alapértelmezésből eldönteni.
